@@ -34,7 +34,9 @@ function CallLogModal({ onClose, onSave }: { onClose: () => void; onSave: (fu: O
 
   // Step 2 fields
   const [fuType, setFuType] = useState<'phone' | 'line' | 'other'>('phone')
-  const [fuDate, setFuDate] = useState(new Date().toISOString().slice(0, 16))
+  const [fuDateOnly, setFuDateOnly] = useState(new Date().toISOString().slice(0, 10))
+  const [fuTimeOnly, setFuTimeOnly] = useState(new Date().toTimeString().slice(0, 5))
+  const fuDate = `${fuDateOnly}T${fuTimeOnly}`
   const [fuResult, setFuResult] = useState('')
   const [fuDetail, setFuDetail] = useState('')
   const [fuPromiseDate, setFuPromiseDate] = useState('')
@@ -203,8 +205,8 @@ function CallLogModal({ onClose, onSave }: { onClose: () => void; onSave: (fu: O
                 </div>
                 <div>
                   <div style={{ fontSize: 12, fontWeight: 600, color: '#6b5b95', marginBottom: 6 }}>วันที่และเวลา</div>
-                  <input className="input-field" type="datetime-local" value={fuDate} onChange={e => setFuDate(e.target.value)} />
-                </div>
+                  <input className="input-field" type="time" value={fuTimeOnly} onChange={e => setFuTimeOnly(e.target.value)}/>
+                  </div>
               </div>
 
               <div style={{ marginBottom: 12 }}>
@@ -349,7 +351,7 @@ export default function DashboardPage() {
 
   // Quick Menu — 3 items, visible to all roles
   const quickMenuItems = [
-    { icon: '📞', label: 'บันทึก Call Log', sub: 'บันทึกผลการโทรติดตาม', color: '#7c5cbf', action: () => setShowCallLog(true) },
+    { icon: '📞', label: 'บันทึกการติดตามการชำระภาษี', sub: 'บันทึกผลการโทรติดตาม', color: '#7c5cbf', action: () => setShowCallLog(true) },
     { icon: '💳', label: 'ตรวจสอบและบันทึกการชำระ', sub: 'ค้นหายอดหรือบันทึกชำระ', color: '#3a5fbf', action: () => navigate('/search-payment') },
     { icon: '📊', label: 'ดูรายงานวันนี้', sub: 'รายงานสรุปประจำวัน', color: '#1a8f5a', action: () => navigate('/reports') },
   ]

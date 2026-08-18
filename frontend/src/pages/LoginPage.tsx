@@ -70,20 +70,9 @@ export default function LoginPage() {
               </div>
             )}
             <button className="btn-primary" type="submit" style={{ width: '100%', padding: '13px', fontSize: 15 }} disabled={loading}>
-              {loading ? '⏳ กำลังตรวจสอบ...' : '🔐 เข้าสู่ระบบ'}
+              {loading ? '⏳ กำลังตรวจสอบ...' : 'เข้าสู่ระบบ'}
             </button>
           </form>
-
-          <div style={{ marginTop: 24, padding: '14px 16px', background: 'rgba(124,92,191,0.05)', borderRadius: 12, border: '1px dashed rgba(124,92,191,0.2)' }}>
-            <div style={{ fontSize: 11, color: '#a89cc8', fontWeight: 600, marginBottom: 8 }}>🔑 บัญชีสำหรับทดสอบ</div>
-            <div style={{ display: 'grid', gap: 4 }}>
-              {[['EMP001','officer1','พนักงาน กลุ่ม ก-น'],['DIR001','director1','ผู้บริหาร'],['ADM001','admin1','แอดมิน']].map(([u,p,r]) => (
-                <button key={u} onClick={() => { setUsername(u); setPassword(p) }} style={{ textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 0', fontSize: 11, color: '#7c5cbf', fontFamily: "'Sarabun',sans-serif" }}>
-                  {u} / {p} — <span style={{ color: '#a89cc8' }}>{r}</span>
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
       </div>
     </div>

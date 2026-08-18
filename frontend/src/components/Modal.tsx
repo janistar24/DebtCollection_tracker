@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom'
 import type { ReactNode } from 'react'
 
 interface Props {
@@ -8,9 +9,9 @@ interface Props {
 }
 
 export default function Modal({ title, onClose, children, maxWidth = '540px' }: Props) {
-  return (
+  return createPortal(
     <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="modal-box" style={{ maxWidth }}>
+      <div className="modal-box" style={{maxWidth,background: '#ffffff',border: '1px solid #ddd',borderRadius: 18,maxHeight: '90vh',overflowY: 'auto'}}>
         <div style={{ padding: '24px 28px 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#2d2545' }}>{title}</h3>
           <button onClick={onClose} style={{
@@ -21,6 +22,7 @@ export default function Modal({ title, onClose, children, maxWidth = '540px' }: 
         </div>
         <div style={{ padding: '20px 28px 28px' }}>{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

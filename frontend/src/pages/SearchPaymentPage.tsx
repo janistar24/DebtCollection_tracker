@@ -4,9 +4,18 @@ import StatusBadge from '../components/StatusBadge'
 import Modal from '../components/Modal'
 import EmptyState from '../components/EmptyState'
 import {
-  getTaxpayerName, formatCurrency, formatDate, formatDateTime,
-  getTotalAssessed, getTotalRemaining, getPaymentStatus,
-  getLastFollowUp, CURRENT_YEAR, getUserById
+  getTaxpayerName,
+  formatCurrency,
+  formatDate,
+  formatDateTime,
+  getTotalAssessed,
+  getTotalRemaining,
+  getLandRemaining,
+  getSignRemaining,
+  getPaymentStatus,
+  getLastFollowUp,
+  CURRENT_YEAR,
+  getUserById
 } from '../data/mockData'
 import type { Taxpayer, Payment } from '../types'
 
@@ -17,6 +26,14 @@ const CALL_RESULT_LABELS: Record<string, string> = {
 
 interface Candidate {
   tp: Taxpayer
+
+  taxType: 'land' | 'sign' | 'both'
+
+  assessedForType: number
+  remainingForType: number
+
+  totalRemaining: number
+
   diff: number
   exact: boolean
 }
@@ -52,6 +69,8 @@ export default function SearchPaymentPage() {
 
   // Payment form
   const [payDate, setPayDate] = useState(new Date().toISOString().slice(0, 10))
+  const [payTime, setPayTime] =
+  useState(new Date().toTimeString().slice(0, 5))
   const [payMethod, setPayMethod] = useState<'transfer' | 'cash'>('transfer')
   const [payRef, setPayRef] = useState('')
   const [payReceipt, setPayReceipt] = useState('')
@@ -77,29 +96,164 @@ export default function SearchPaymentPage() {
       return getTotalRemaining(tp, selectedYear) > 0
     })
 
-    const results: Candidate[] = pool
-      .filter(tp => {
-        const remaining = getTotalRemaining(tp, selectedYear)
-        const assess = tp.assessments.find(a => a.year === selectedYear)
-        if (taxTypeFilter === 'land' && !(assess?.landAmount)) return false
-        if (taxTypeFilter === 'sign' && !(assess?.signAmount)) return false
-        if (name) {
-          return getTaxpayerName(tp).toLowerCase().includes(name) ||
-            tp.ownerCode.toLowerCase().includes(name)
+  const results: Candidate[] = pool
+    .flatMap(tp => {
+
+      const assess = tp.assessments.find(
+        a => a.year === selectedYear
+      )
+
+      if (!assess) {
+        return []
+      }
+
+      const landRemaining =
+        getLandRemaining(tp, selectedYear)
+
+      const signRemaining =
+        getSignRemaining(tp, selectedYear)
+
+      const totalRemaining =
+        getTotalRemaining(tp, selectedYear)
+
+
+      const candidates: Candidate[] = []
+
+      const tolerance =
+        Math.max(amt * 0.1, 5)
+
+
+      // ==========================================
+      // MATCH ภาษีที่ดินและสิ่งปลูกสร้าง
+      // ==========================================
+      if (
+        taxTypeFilter === 'all' ||
+        taxTypeFilter === 'land'
+      ) {
+
+        if (landRemaining > 0) {
+
+          const diff =
+            landRemaining - amt
+
+          if (
+            Math.abs(diff) <= tolerance
+          ) {
+
+            candidates.push({
+              tp,
+
+              taxType: 'land',
+
+              assessedForType:
+                assess.landAmount,
+
+              remainingForType:
+                landRemaining,
+
+              totalRemaining,
+
+              diff,
+
+              exact:
+                Math.abs(diff) < 0.01
+            })
+          }
         }
-        if (amt > 0) {
-          const diff = Math.abs(remaining - amt)
-          return diff <= Math.max(amt * 0.1, 5)
+      }
+
+
+      // ==========================================
+      // MATCH ภาษีป้าย
+      // ==========================================
+      if (
+        taxTypeFilter === 'all' ||
+        taxTypeFilter === 'sign'
+      ) {
+
+        if (signRemaining > 0) {
+
+          const diff =
+            signRemaining - amt
+
+          if (
+            Math.abs(diff) <= tolerance
+          ) {
+
+            candidates.push({
+              tp,
+
+              taxType: 'sign',
+
+              assessedForType:
+                assess.signAmount,
+
+              remainingForType:
+                signRemaining,
+
+              totalRemaining,
+
+              diff,
+
+              exact:
+                Math.abs(diff) < 0.01
+            })
+          }
         }
-        return false
-      })
-      .map(tp => {
-        const remaining = getTotalRemaining(tp, selectedYear)
-        const diff = amt > 0 ? remaining - amt : 0
-        return { tp, diff, exact: Math.abs(diff) < 0.01 }
-      })
-      .sort((a, b) => Math.abs(a.diff) - Math.abs(b.diff))
-      .slice(0, 20)
+      }
+
+
+      // ==========================================
+      // MATCH ยอดรวม
+      // แสดงเฉพาะเมื่อเลือก "ทุกประเภท"
+      // และมีภาษีมากกว่า 1 ประเภท
+      // ==========================================
+      if (
+        taxTypeFilter === 'all' &&
+        landRemaining > 0 &&
+        signRemaining > 0
+      ) {
+
+        const diff =
+          totalRemaining - amt
+
+        if (
+          Math.abs(diff) <= tolerance
+        ) {
+
+          candidates.push({
+            tp,
+
+            taxType: 'both',
+
+            assessedForType:
+              assess.landAmount +
+              assess.signAmount,
+
+            remainingForType:
+              totalRemaining,
+
+            totalRemaining,
+
+            diff,
+
+            exact:
+              Math.abs(diff) < 0.01
+          })
+        }
+      }
+
+
+      return candidates
+    })
+
+    .sort(
+      (a, b) =>
+        Math.abs(a.diff) -
+        Math.abs(b.diff)
+    )
+
+    .slice(0, 20)
 
     setCandidates(results)
     setSearched(true)
@@ -234,13 +388,6 @@ export default function SearchPaymentPage() {
               <span style={{ fontSize: 14, color: '#a89cc8', whiteSpace: 'nowrap' }}>บาท</span>
             </div>
           </div>
-          <div style={{ flex: '0 0 auto' }}>
-            <label style={LBL}>หรือค้นหาจากชื่อ / รหัส</label>
-            <input className="input-field" placeholder="ชื่อ-นามสกุล หรือ Owner Code"
-              value={nameSearch} onChange={e => setNameSearch(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && runSearch()}
-              style={{ width: 220 }} />
-          </div>
           <button className="btn-primary" onClick={runSearch}
             style={{ alignSelf: 'flex-end', padding: '11px 28px', fontSize: 15 }}>
             🔍 ค้นหายอด
@@ -307,7 +454,7 @@ export default function SearchPaymentPage() {
               </div>
             </div>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: drawerTp ? '1fr 380px' : '1fr', gap: 20, alignItems: 'start' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 380px', gap: 20, alignItems: 'start', grid: drawerTp ? 'unset' : 'none' }}>
               {/* Table */}
               <div>
                 <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -331,7 +478,7 @@ export default function SearchPaymentPage() {
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                       <thead>
                         <tr style={{ background: 'rgba(240,236,251,0.5)' }}>
-                          {['#', 'รหัส', 'ชื่อ', 'ประเภทภาษี', 'ปีภาษี', 'ยอดภาษี', 'ชำระแล้ว', 'ยอดคงเหลือ', 'ส่วนต่าง', 'สถานะ', ''].map(h => (
+                          {['#', 'รหัส', 'ชื่อ', 'ประเภทภาษี', 'ปีภาษี', 'ยอดภาษี', 'ประเภทภาษีที่ตรง', 'ชำระแล้ว', 'ยอดคงเหลือ', 'ส่วนต่าง', 'สถานะ', ''].map(h => (
                             <th key={h} style={TH}>{h}</th>
                           ))}
                         </tr>
@@ -348,7 +495,8 @@ export default function SearchPaymentPage() {
                           const diffSign = c.diff >= 0 ? '+' : ''
 
                           return (
-                            <tr key={tp.id}
+                            <tr 
+                              key={`${tp.id}-${c.taxType}`}
                               style={{
                                 borderBottom: '1px solid rgba(200,190,240,0.15)',
                                 background: isSelected ? 'rgba(124,92,191,0.06)' : undefined,
@@ -364,9 +512,10 @@ export default function SearchPaymentPage() {
                               <td style={{ ...TD, fontWeight: 500, color: '#2d2545', whiteSpace: 'nowrap' }}>{getTaxpayerName(tp)}</td>
                               <td style={{ ...TD, fontSize: 12, color: '#6b5b95' }}>{taxType || '-'}</td>
                               <td style={{ ...TD, fontSize: 12, color: '#a89cc8' }}>{selectedYear}</td>
-                              <td style={{ ...TD, textAlign: 'right' }}>฿{formatCurrency(assessed)}</td>
+                              <td style={{ ...TD, textAlign: 'right' }}>฿{formatCurrency(c.assessedForType)}</td>
+                              <td style={{ ...TD, fontSize: 12, color: '#7c5cbf', fontWeight: 600 }}> {c.taxType === 'land' ? 'ภาษีที่ดินและสิ่งปลูกสร้าง' : c.taxType === 'sign' ? 'ภาษีป้าย' : 'ยอดรวม'} </td>
                               <td style={{ ...TD, textAlign: 'right', color: '#1a8f5a' }}>฿{formatCurrency(paid)}</td>
-                              <td style={{ ...TD, textAlign: 'right', fontWeight: 700, color: '#c0392b' }}>฿{formatCurrency(remaining)}</td>
+                              <td style={{ ...TD, textAlign: 'right', fontWeight: 700, color: '#c0392b' }}>฿{formatCurrency(c.remainingForType)}</td>
                               <td style={{ ...TD, textAlign: 'right' }}>
                                 {c.exact ? (
                                   <span className="status-badge" style={{ background: '#e8fdf4', color: '#1a8f5a', fontSize: 11 }}>ยอดตรง</span>
@@ -380,7 +529,7 @@ export default function SearchPaymentPage() {
                               <td style={TD}><StatusBadge status={getPaymentStatus(tp, selectedYear)} size="sm" /></td>
                               <td style={TD}>
                                 <button className="btn-primary"
-                                  onClick={() => { setDrawerTp(tp); setPayDate(new Date().toISOString().slice(0, 10)); setPayRef(''); setPayReceipt(''); setPayMethod('transfer') }}
+                                  onClick={() => { setDrawerTp(tp); setPayDate(new Date().toISOString().slice(0, 10)); setPayTime(new Date().toTimeString().slice(0, 5)); setPayRef(''); setPayReceipt(''); setPayMethod('transfer') }}
                                   style={{ fontSize: 12, padding: '6px 14px', background: isSelected ? 'linear-gradient(135deg,#5a3a9f,#7c5cbf)' : undefined }}>
                                   ตรวจสอบ
                                 </button>
@@ -396,11 +545,11 @@ export default function SearchPaymentPage() {
 
               {/* Drawer */}
               {drawerTp && (
-                <div className="glass-card" style={{ padding: '22px 22px', position: 'sticky', top: 76 }}>
+                <div className="glass-card" style={{ padding: '22px 22px', position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 1000, maxWidth: '500px', width: '90%', maxHeight: '90vh', overflowY: 'auto', background: '#ffffff', border: '1px solid rgba(124,92,191,0.12)', boxShadow: '0 20px 40px rgba(30, 19, 53, 0.12)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
                     <span style={{ fontSize: 14, fontWeight: 700, color: '#2d2545' }}>ตรวจสอบผู้เสียภาษี</span>
                     <button onClick={() => setDrawerTp(null)} style={{
-                      background: 'rgba(124,92,191,0.08)', border: 'none', borderRadius: 8,
+                      background: 'rgba(8, 6, 12, 0.08)', border: 'none', borderRadius: 8,
                       width: 28, height: 28, cursor: 'pointer', color: '#7c5cbf', fontSize: 16,
                       display: 'flex', alignItems: 'center', justifyContent: 'center'
                     }}>×</button>
@@ -489,7 +638,7 @@ export default function SearchPaymentPage() {
           ) : (
             <>
               {/* Summary */}
-              <div style={{ padding: '14px 16px', background: 'rgba(240,236,251,0.5)', borderRadius: 12, marginBottom: 18, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, fontSize: 13 }}>
+              <div style={{ padding: '14px 16px', background: 'rgba(240,236,251,0.5)', borderRadius: 12, marginBottom: 14, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, fontSize: 13 }}>
                 <div><div style={SLIM}>ผู้เสียภาษี</div><div style={{ fontWeight: 700, color: '#2d2545' }}>{getTaxpayerName(drawerTp)}</div></div>
                 <div><div style={SLIM}>ปีภาษี</div><div style={{ fontWeight: 700, color: '#2d2545' }}>{selectedYear}</div></div>
                 <div style={{ gridColumn: '1/-1' }}><div style={SLIM}>ยอดที่ต้องชำระ</div><div style={{ fontSize: 18, fontWeight: 700, color: '#c0392b' }}>฿{formatCurrency(drawerRemaining)}</div></div>
@@ -511,15 +660,24 @@ export default function SearchPaymentPage() {
                 ))}
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, marginBottom: 14 }}>
                 <div>
                   <label style={LBL}>วันที่ชำระ</label>
                   <input className="input-field" type="date" value={payDate} onChange={e => setPayDate(e.target.value)} />
                 </div>
                 <div>
+                  <label style={LBL}>เวลาชำระ</label>
+                  <input
+                    className="input-field"
+                    type="time"
+                    value={payTime}
+                    onChange={e => setPayTime(e.target.value)}
+                  />
+                </div>
+                <div>
                   <label style={LBL}>ช่องทางการชำระ</label>
                   <div style={{ display: 'flex', gap: 6 }}>
-                    {[['transfer', '💳 โอน'], ['cash', '💵 สด']].map(([v, l]) => (
+                    {[['transfer', 'โอนเงิน'], ['cash', 'เงินสด']].map(([v, l]) => (
                       <button key={v} type="button" onClick={() => setPayMethod(v as 'transfer' | 'cash')} style={{
                         flex: 1, padding: '9px 8px', borderRadius: 10, cursor: 'pointer', fontFamily: "'Sarabun',sans-serif", fontSize: 13,
                         border: payMethod === v ? '1.5px solid #7c5cbf' : '1px solid rgba(180,165,230,0.3)',
@@ -632,6 +790,7 @@ function DirectPaymentTab() {
   const [amt, setAmt] = useState('')
   const [payDate, setPayDate] = useState(new Date().toISOString().slice(0, 10))
   const [method, setMethod] = useState<'transfer' | 'cash'>('cash')
+  const [payTaxType, setPayTaxType] = useState<'land' | 'sign' | 'both'>('both')
   const [refNo, setRefNo] = useState('')
   const [receiptNo, setReceiptNo] = useState('')
   const [saving, setSaving] = useState(false)
