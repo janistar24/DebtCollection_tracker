@@ -72,3 +72,44 @@ export async function getTaxpayers(): Promise<Taxpayer[]> {
     active: taxpayer.is_active,
   }))
 }
+
+export interface TaxpayerCreate {
+  taxpayer_type: 'INDIVIDUAL' | 'COMPANY'
+  owner_code: string | null
+  first_name: string | null
+  last_name: string | null
+  company_name: string | null
+  phone: string | null
+  address: string | null
+  group_code: string
+  is_active: boolean
+}
+
+export async function createTaxpayer(
+  data: TaxpayerCreate
+) {
+  const response = await fetch(
+    `${API_URL}/taxpayers`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(data)
+    }
+  )
+
+  const result = await response.json()
+
+  if (!response.ok || !result.success) {
+    throw new Error(
+      typeof result.detail === 'string'
+        ? result.detail
+        : result.detail?.message ??
+          result.message ??
+          'เพิ่มผู้เสียภาษีไม่สำเร็จ'
+    )
+  }
+
+  return result
+}

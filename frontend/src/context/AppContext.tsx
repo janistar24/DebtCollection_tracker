@@ -51,6 +51,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
               tax_assessment.taxpayerId === taxpayer.id
           )
           .map(tax_assessment => ({
+            yearRecordId: tax_assessment.yearRecordId,
+            landAssessmentId: tax_assessment.landAssessmentId,
+            signAssessmentId: tax_assessment.signAssessmentId,
             year: tax_assessment.year,
             landAmount: tax_assessment.landAmount,
             signAmount: tax_assessment.signAmount,

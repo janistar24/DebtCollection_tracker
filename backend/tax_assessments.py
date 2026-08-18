@@ -71,6 +71,26 @@ class Tax_assessments:
                     MAX(
                         CASE
                             WHEN ta.tax_type = 'LAND_BUILDING'
+                            THEN ta.assessment_id
+                        END
+                    ),
+                    0
+                ) AS land_assessment_id,
+
+                COALESCE(
+                    MAX(
+                        CASE
+                            WHEN ta.tax_type = 'SIGN'
+                            THEN ta.assessment_id
+                        END
+                    ),
+                    0
+                ) AS sign_assessment_id,
+
+                COALESCE(
+                    MAX(
+                        CASE
+                            WHEN ta.tax_type = 'LAND_BUILDING'
                             THEN ta.assessed_amount
                         END
                     ),
@@ -86,7 +106,6 @@ class Tax_assessments:
                     ),
                     0
                 ) AS sign_amount,
-
                 COALESCE(
                     MAX(
                         CASE

@@ -5,6 +5,9 @@ interface TaxAssessmentsApi {
   taxpayer_id: number
   tax_year: number
   note: string | null
+  
+  land_assessment_id: number | null
+  sign_assessment_id: number | null
 
   land_amount: number
   sign_amount: number
@@ -15,6 +18,9 @@ interface TaxAssessmentsApi {
 interface TaxAssessment {
   yearRecordId: string
   taxpayerId: string
+
+  landAssessmentId: string | null
+  signAssessmentId: string | null
 
   year: number
   landAmount: number
@@ -31,6 +37,7 @@ interface TaxAssessmentsResponse {
   data: TaxAssessmentsApi[]
 }
 
+// READ ALL
 const API_URL =
   import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api'
 
@@ -53,6 +60,16 @@ export async function getTaxAssessments(): Promise<TaxAssessment[]> {
     yearRecordId: String(tax_assessment.year_record_id),
     taxpayerId: String(tax_assessment.taxpayer_id),
 
+    landAssessmentId:
+    tax_assessment.land_assessment_id !== null
+      ? String(tax_assessment.land_assessment_id)
+      : '',
+
+    signAssessmentId:
+    tax_assessment.sign_assessment_id !== null
+      ? String(tax_assessment.sign_assessment_id)
+      : '',
+
     year: tax_assessment.tax_year,
 
     landAmount: Number(tax_assessment.land_amount),
@@ -63,4 +80,84 @@ export async function getTaxAssessments(): Promise<TaxAssessment[]> {
 
     note: tax_assessment.note ?? '',
   }))
+}
+
+// CREATE
+interface TaxAssessmentCreate {
+  year_record_id: number
+  tax_type: 'LAND_BUILDING' | 'SIGN'
+  assessed_amount: number
+  previous_amount: number
+  change_reason: string | null
+  assessment_date: string | null
+  annual_due_date: string | null
+  created_by: number | null
+}
+
+export async function createTaxAssessment(
+  data: TaxAssessmentCreate
+) {
+  const response = await fetch(
+    `${API_URL}/tax-assessments`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(data)
+    }
+  )
+
+  const result = await response.json()
+
+  if (!response.ok || !result.success) {
+    throw new Error(
+      typeof result.detail === 'string'
+        ? result.detail
+        : result.detail?.message ??
+          result.message ??
+          'เพิ่มข้อมูลการประเมินภาษีไม่สำเร็จ'
+    )
+  }
+
+  return result
+}
+
+//UPDATE
+interface TaxAssessmentUpdate {
+  assessed_amount: number
+  previous_amount: number
+  change_reason: string | null
+  assessment_date: string | null
+  annual_due_date: string | null
+  updated_by: number | null
+}
+export async function updateTaxAssessment(
+  assessmentId: number,
+  data: TaxAssessmentUpdate
+) {
+  const response = await fetch(
+    `${API_URL}/tax-assessments/${assessmentId}`,
+    {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(data)
+    }
+  )
+
+  const result = await response.json()
+
+  if (!response.ok || !result.success) {
+    throw new Error(
+      typeof result.detail === 'string'
+        ? result.detail
+        : result.detail?.message ??
+          result.message ??
+          'แก้ไขข้อมูลการประเมินภาษีไม่สำเร็จ'
+    )
+  }
+
+  return result
 }

@@ -4,6 +4,14 @@ import { useApp } from '../context/AppContext'
 import { CURRENT_YEAR } from '../data/mockData'
 import { generateOwnerCode, isDuplicateCode } from '../utils/ownerCode'
 import type { Taxpayer } from '../types'
+import { createTaxpayer } from '../api/taxpayers'
+import {
+  createTaxpayerYearRecord
+} from '../api/taxpayer_year_records'
+
+import {
+  createTaxAssessment
+} from '../api/tax_assessments'
 
 export default function AddTaxpayerPage() {
   const { addTaxpayer, currentUser, taxpayers } = useApp()
@@ -66,38 +74,211 @@ export default function AddTaxpayerPage() {
     return errs
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    const errs = validate()
-    if (Object.keys(errs).length > 0) { setErrors(errs); return }
-    setSaving(true)
-    await new Promise(r => setTimeout(r, 600))
+const handleSubmit = async (
+  e: React.FormEvent
+) => {
+  e.preventDefault()
 
-    const ownerCode = tpType === 'individual' ? generatedCode : `BC-${Date.now().toString().slice(-6)}`
-    const group: Taxpayer['group'] = tpType === 'company' ? 'ว-ฮ และบริษัท' : getGroupFromCode(ownerCode)
+  const errs = validate()
 
-    const tp: Taxpayer = {
-      id: `tp${Date.now()}`,
-      ownerCode,
-      type: tpType,
-      firstName: tpType === 'individual' ? firstName : '',
-      lastName: tpType === 'individual' ? lastName : '',
-      companyName: tpType === 'company' ? companyName : undefined,
-      phone, address, group,
-      responsibleOfficer: currentUser?.id ?? 'u1',
-      assessments: [{
-        year: CURRENT_YEAR,
-        landAmount: parseFloat(landAmount) || 0,
-        signAmount: parseFloat(signAmount) || 0,
-        prevLandAmount: 0, prevSignAmount: 0
-      }],
-      payments: [], followUps: [], active: true
-    }
-    addTaxpayer(tp)
-    setSaving(false)
-    setSaved(true)
-    setTimeout(() => navigate('/taxpayers'), 1500)
+  if (Object.keys(errs).length > 0) {
+    setErrors(errs)
+    return
   }
+
+  try {
+    setSaving(true)
+
+    const ownerCode =
+      tpType === 'individual'
+        ? generatedCode
+        : null
+
+    const group: Taxpayer['group'] =
+      tpType === 'company'
+        ? 'ว-ฮ และบริษัท'
+        : getGroupFromCode(generatedCode)
+
+
+    // ============================
+    // 1. CREATE MASTER TAXPAYER
+    // ============================
+
+    const taxpayerResult =
+      await createTaxpayer({
+        taxpayer_type:
+          tpType === 'company'
+            ? 'COMPANY'
+            : 'INDIVIDUAL',
+
+        owner_code:
+          ownerCode,
+
+        first_name:
+          tpType === 'individual'
+            ? firstName
+            : null,
+
+        last_name:
+          tpType === 'individual'
+            ? lastName
+            : null,
+
+        company_name:
+          tpType === 'company'
+            ? companyName
+            : null,
+
+        phone:
+          phone || null,
+
+        address:
+          address || null,
+
+        group_code:
+          group,
+
+        is_active:
+          true
+      })
+
+
+    // ต้องได้ taxpayer_id กลับมาจาก API
+    const taxpayerId =
+      Number(
+        taxpayerResult.data.taxpayer_id
+      )
+
+
+    // ============================
+    // 2. CREATE YEAR RECORD
+    // ============================
+
+    const yearResult =
+      await createTaxpayerYearRecord({
+        taxpayer_id:
+          taxpayerId,
+
+        tax_year:
+          CURRENT_YEAR,
+
+        note:
+          null,
+
+        added_by:
+          currentUser?.id
+            ? Number(currentUser.id)
+            : null
+      })
+
+
+    const yearRecordId =
+      Number(
+        yearResult.data.year_record_id
+      )
+
+
+    const land =
+      parseFloat(landAmount) || 0
+
+    const sign =
+      parseFloat(signAmount) || 0
+
+
+    // ============================
+    // 3. CREATE LAND ASSESSMENT
+    // ============================
+
+    if (land > 0) {
+      await createTaxAssessment({
+        year_record_id:
+          yearRecordId,
+
+        tax_type:
+          'LAND_BUILDING',
+
+        assessed_amount:
+          land,
+
+        previous_amount:
+          0,
+
+        change_reason:
+          null,
+
+        assessment_date:
+          null,
+
+        annual_due_date:
+          null,
+
+        created_by:
+          currentUser?.id
+            ? Number(currentUser.id)
+            : null
+      })
+    }
+
+
+    // ============================
+    // 4. CREATE SIGN ASSESSMENT
+    // ============================
+
+    if (sign > 0) {
+      await createTaxAssessment({
+        year_record_id:
+          yearRecordId,
+
+        tax_type:
+          'SIGN',
+
+        assessed_amount:
+          sign,
+
+        previous_amount:
+          0,
+
+        change_reason:
+          null,
+
+        assessment_date:
+          null,
+
+        annual_due_date:
+          null,
+
+        created_by:
+          currentUser?.id
+            ? Number(currentUser.id)
+            : null
+      })
+    }
+
+
+    setSaved(true)
+
+    setTimeout(
+      () => navigate('/taxpayers'),
+      1500
+    )
+
+  } catch (error) {
+
+    console.error(
+      'Create taxpayer error:',
+      error
+    )
+
+    alert(
+      error instanceof Error
+        ? error.message
+        : 'เพิ่มผู้เสียภาษีไม่สำเร็จ'
+    )
+
+  } finally {
+    setSaving(false)
+  }
+}
 
   if (saved) return (
     <div style={{ minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

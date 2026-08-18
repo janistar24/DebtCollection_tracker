@@ -20,6 +20,9 @@ export type TaxpayerType = 'individual' | 'company'
 export type Group = 'ก-น' | 'บ-ล' | 'ส-ศ' | 'ว-ฮ และบริษัท'
 
 export interface TaxAssessment {
+  yearRecordId: string
+  landAssessmentId: string
+  signAssessmentId: string
   year: number
   landAmount: number
   signAmount: number

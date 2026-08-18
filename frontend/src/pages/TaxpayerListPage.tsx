@@ -8,6 +8,15 @@ import {
   getTaxpayerName, formatCurrency, getAssessment, getPaymentStatus,
   CURRENT_YEAR, getGroupForCode
 } from '../data/mockData'
+import {
+  createTaxAssessment,
+  updateTaxAssessment
+} from '../api/tax_assessments'
+import {
+  createTaxpayerYearRecord,
+  removeTaxpayerFromYear,
+  updateTaxpayerYearRecord
+} from '../api/taxpayer_year_records'
 import type { Taxpayer } from '../types'
 
 const GROUPS = ['ก-น', 'บ-ล', 'ส-ศ', 'ว-ฮ และบริษัท']
@@ -129,51 +138,330 @@ export default function TaxpayerListPage() {
   }
 
   const handleSaveAll = async () => {
+  try {
     setSaving(true)
-    await new Promise(r => setTimeout(r, 600))
-    // apply all pending edits
-    const grouped: Record<string, { land?: number; sign?: number }> = {}
-    Object.entries(pendingEdits).forEach(([key, edit]) => {
-      const [id, type] = key.split('-') as [string, 'land' | 'sign']
-      if (!grouped[id]) grouped[id] = {}
-      grouped[id][type] = edit.newVal
-    })
-    taxpayers.forEach(tp => {
-      if (!grouped[tp.id]) return
+
+    // รวม pending edits ของ LAND / SIGN ตาม taxpayer
+    const grouped: Record<
+      string,
+      { land?: number; sign?: number }
+    > = {}
+
+    Object.entries(pendingEdits).forEach(
+      ([key, edit]) => {
+        const [id, type] = key.split('-') as [
+          string,
+          'land' | 'sign'
+        ]
+
+        if (!grouped[id]) {
+          grouped[id] = {}
+        }
+
+        grouped[id][type] = edit.newVal
+      }
+    )
+
+    // ==========================================
+    // SAVE TAX ASSESSMENTS ลง PostgreSQL
+    // ==========================================
+    for (const tp of taxpayers) {
+      if (!grouped[tp.id]) continue
+
+      const assessment = tp.assessments.find(
+        a => a.year === selectedYear
+      )
+
+      if (!assessment) continue
+
+      if (!assessment.yearRecordId) {
+        throw new Error(
+          `ไม่พบ yearRecordId ของ ${getTaxpayerName(tp)}`
+        )
+      }
+
+      const landAmount =
+        grouped[tp.id].land !== undefined
+          ? grouped[tp.id].land!
+          : assessment.landAmount
+
+      const signAmount =
+        grouped[tp.id].sign !== undefined
+          ? grouped[tp.id].sign!
+          : assessment.signAmount
+
+
+      // =========================
+      // LAND_BUILDING
+      // =========================
+
+      if (grouped[tp.id].land !== undefined) {
+
+        // มี assessment เดิมอยู่แล้ว → UPDATE
+        if (assessment.landAssessmentId) {
+
+          await updateTaxAssessment(
+            Number(assessment.landAssessmentId),
+            {
+              assessed_amount: landAmount,
+
+              previous_amount:
+                assessment.prevLandAmount ?? 0,
+
+              change_reason: pendingEdits[`${tp.id}-land`]?.reason ?? null,
+
+              assessment_date: null,
+
+              annual_due_date: null,
+
+              updated_by:
+                currentUser?.id
+                  ? Number(currentUser.id)
+                  : null
+            }
+          )
+
+        }
+
+        // ยังไม่มี LAND row → CREATE
+        else if (landAmount > 0) {
+
+          await createTaxAssessment({
+            year_record_id:
+              Number(assessment.yearRecordId),
+
+            tax_type:
+              'LAND_BUILDING',
+
+            assessed_amount:
+              landAmount,
+
+            previous_amount:
+              assessment.prevLandAmount ?? 0,
+
+            change_reason: null,
+
+            assessment_date: null,
+
+            annual_due_date: null,
+
+            created_by:
+              currentUser?.id
+                ? Number(currentUser.id)
+                : null
+          })
+        }
+      }
+
+
+      // =========================
+      // SIGN
+      // =========================
+
+      if (grouped[tp.id].sign !== undefined) {
+
+        // มี assessment เดิมอยู่แล้ว → UPDATE
+        if (assessment.signAssessmentId) {
+
+          await updateTaxAssessment(
+            Number(assessment.signAssessmentId),
+            {
+              assessed_amount:
+                signAmount,
+
+              previous_amount:
+                assessment.prevSignAmount ?? 0,
+
+              change_reason: pendingEdits[`${tp.id}-sign`]?.reason ?? null,
+
+              assessment_date: null,
+
+              annual_due_date: null,
+
+              updated_by:
+                currentUser?.id
+                  ? Number(currentUser.id)
+                  : null
+            }
+          )
+
+        }
+
+        // ยังไม่มี SIGN row → CREATE
+        else if (signAmount > 0) {
+
+          await createTaxAssessment({
+            year_record_id:
+              Number(assessment.yearRecordId),
+
+            tax_type:
+              'SIGN',
+
+            assessed_amount:
+              signAmount,
+
+            previous_amount:
+              assessment.prevSignAmount ?? 0,
+
+            change_reason: null,
+
+            assessment_date: null,
+
+            annual_due_date: null,
+
+            created_by:
+              currentUser?.id
+                ? Number(currentUser.id)
+                : null
+          })
+        }
+      }
+
+
+      // ==========================================
+      // UPDATE REACT STATE เดิมของ FIGMA
+      // ==========================================
+
       const updated: Taxpayer = {
         ...tp,
+
         assessments: tp.assessments.map(a => {
-          if (a.year !== selectedYear) return a
+
+          if (a.year !== selectedYear) {
+            return a
+          }
+
           return {
             ...a,
-            ...(grouped[tp.id].land !== undefined ? { landAmount: grouped[tp.id].land! } : {}),
-            ...(grouped[tp.id].sign !== undefined ? { signAmount: grouped[tp.id].sign! } : {}),
+
+            ...(grouped[tp.id].land !== undefined
+              ? {
+                  landAmount:
+                    grouped[tp.id].land!
+                }
+              : {}),
+
+            ...(grouped[tp.id].sign !== undefined
+              ? {
+                  signAmount:
+                    grouped[tp.id].sign!
+                }
+              : {})
           }
         })
       }
+
       updateTaxpayer(updated)
-    })
-    setSaving(false)
-    setSaveConfirm(false)
-    // apply pending notes
-    taxpayers.forEach(tp => {
-      if (pendingNotes[tp.id] === undefined) return
-      updateTaxpayer({ ...tp, notes: pendingNotes[tp.id] })
-    })
+    }
+
+
+    // ==========================================
+    // SAVE NOTE
+    // ==========================================
+
+    for (const tp of taxpayers) {
+
+      if (pendingNotes[tp.id] === undefined) {
+        continue
+      }
+
+      const assessment = tp.assessments.find(
+        a => a.year === selectedYear
+      )
+
+      if (!assessment?.yearRecordId) {
+        continue
+      }
+
+      await updateTaxpayerYearRecord(
+        Number(assessment.yearRecordId),
+        {
+          note: pendingNotes[tp.id],
+          is_included: true
+        }
+      )
+
+      // update React state เดิม
+      updateTaxpayer({
+        ...tp,
+        notes: pendingNotes[tp.id]
+      })
+    }
+
+
     setPendingEdits({})
     setPendingNotes({})
-    setEditMode(false)
-  }
 
-  const handleRemove = (tp: Taxpayer) => {
-    // Remove assessment for this year (soft remove)
+    setSaveConfirm(false)
+    setEditMode(false)
+
+  } catch (error) {
+
+    console.error(
+      'Save annual taxpayer error:',
+      error
+    )
+
+    alert(
+      error instanceof Error
+        ? error.message
+        : 'บันทึกข้อมูลไม่สำเร็จ'
+    )
+
+  } finally {
+
+    setSaving(false)
+  }
+}
+const handleRemove = async (
+  tp: Taxpayer
+) => {
+
+  try {
+
+    const assessment =
+      tp.assessments.find(
+        a => a.year === selectedYear
+      )
+
+    if (!assessment?.yearRecordId) {
+
+      throw new Error(
+        `ไม่พบข้อมูลปีภาษีของ ${getTaxpayerName(tp)}`
+      )
+    }
+
+    await removeTaxpayerFromYear(
+      Number(assessment.yearRecordId)
+    )
+
     const updated: Taxpayer = {
       ...tp,
-      assessments: tp.assessments.filter(a => a.year !== selectedYear)
+
+      assessments:
+        tp.assessments.filter(
+          a => a.year !== selectedYear
+        )
     }
+
     updateTaxpayer(updated)
+
     setRemoveTarget(null)
+
+  } catch (error) {
+
+    console.error(
+      'Remove taxpayer from year error:',
+      error
+    )
+
+    alert(
+      error instanceof Error
+        ? error.message
+        : 'ไม่สามารถนำรายชื่อออกจากปีภาษีได้'
+    )
   }
+}
 
   // ผู้เสียภาษีที่ค้นหาได้ในระบบ (ยังไม่มีในปีนี้) สำหรับ Searchable Dropdown
   const inlineCandidates = useMemo(() => {
@@ -203,23 +491,181 @@ export default function TaxpayerListPage() {
   }
 
   const handleInlineAdd = async () => {
+
     if (!inlineSelected) return
-    setInlineAdding(true)
-    await new Promise(r => setTimeout(r, 400))
-    const land = parseFloat(inlineLand) || 0
-    const sign = parseFloat(inlineSign) || 0
-    const prevAssess = inlineSelected.assessments.find(a => a.year === selectedYear - 1)
-    const updated: Taxpayer = {
-      ...inlineSelected,
-      notes: inlineNote || inlineSelected.notes,
-      assessments: [
-        ...inlineSelected.assessments.filter(a => a.year !== selectedYear),
-        { year: selectedYear, landAmount: land, signAmount: sign, prevLandAmount: prevAssess?.landAmount ?? 0, prevSignAmount: prevAssess?.signAmount ?? 0 }
-      ]
+
+    try {
+
+      setInlineAdding(true)
+
+      const land =
+        parseFloat(inlineLand) || 0
+
+      const sign =
+        parseFloat(inlineSign) || 0
+
+      const prevAssess =
+        inlineSelected.assessments.find(
+          a => a.year === selectedYear - 1
+        )
+
+
+      // 1. เพิ่มผู้เสียภาษีเข้าปีภาษี
+      const yearResult =
+        await createTaxpayerYearRecord({
+          taxpayer_id:
+            Number(inlineSelected.id),
+
+          tax_year:
+            selectedYear,
+
+          note:
+            inlineNote || null,
+
+          added_by:
+            currentUser?.id
+              ? Number(currentUser.id)
+              : null
+        })
+
+
+      const yearRecordId =
+        Number(
+          yearResult.data.year_record_id
+        )
+
+
+      // 2. สร้าง LAND_BUILDING
+      if (land > 0) {
+
+        await createTaxAssessment({
+          year_record_id:
+            yearRecordId,
+
+          tax_type:
+            'LAND_BUILDING',
+
+          assessed_amount:
+            land,
+
+          previous_amount:
+            prevAssess?.landAmount ?? 0,
+
+          change_reason:
+            null,
+
+          assessment_date:
+            null,
+
+          annual_due_date:
+            null,
+
+          created_by:
+            currentUser?.id
+              ? Number(currentUser.id)
+              : null
+        })
+      }
+
+
+      // 3. สร้าง SIGN
+      if (sign > 0) {
+
+        await createTaxAssessment({
+          year_record_id:
+            yearRecordId,
+
+          tax_type:
+            'SIGN',
+
+          assessed_amount:
+            sign,
+
+          previous_amount:
+            prevAssess?.signAmount ?? 0,
+
+          change_reason:
+            null,
+
+          assessment_date:
+            null,
+
+          annual_due_date:
+            null,
+
+          created_by:
+            currentUser?.id
+              ? Number(currentUser.id)
+              : null
+        })
+      }
+
+
+      // 4. อัปเดต React state หลัง DB สำเร็จ
+      const updated: Taxpayer = {
+        ...inlineSelected,
+
+        notes:
+          inlineNote ||
+          inlineSelected.notes,
+
+        assessments: [
+          ...inlineSelected.assessments.filter(
+            a => a.year !== selectedYear
+          ),
+
+          {
+            yearRecordId:
+              String(yearRecordId),
+
+            landAssessmentId: '',
+            signAssessmentId: '',
+
+            year:
+              selectedYear,
+
+            landAmount:
+              land,
+
+            signAmount:
+              sign,
+
+            prevLandAmount:
+              prevAssess?.landAmount ?? 0,
+
+            prevSignAmount:
+              prevAssess?.signAmount ?? 0
+          }
+        ]
+      }
+
+      updateTaxpayer(updated)
+
+
+      // reset form
+      setInlineSelected(null)
+      setInlineSearch('')
+      setInlineLand('')
+      setInlineSign('')
+      setInlineNote('')
+
+    } catch (error) {
+
+      console.error(
+        'Add taxpayer to year error:',
+        error
+      )
+
+      alert(
+        error instanceof Error
+          ? error.message
+          : 'เพิ่มผู้เสียภาษีเข้าปีภาษีไม่สำเร็จ'
+      )
+
+    } finally {
+
+      setInlineAdding(false)
     }
-    updateTaxpayer(updated)
-    setInlineSelected(null); setInlineSearch(''); setInlineLand(''); setInlineSign(''); setInlineNote('')
-    setInlineAdding(false)
   }
 
   const diff = (curr: number, prev: number) => {

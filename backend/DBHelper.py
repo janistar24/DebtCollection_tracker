@@ -54,3 +54,24 @@ class DBHelper:
         self.con.commit()
 
         self.__disconnect__()
+
+    def execute_returning(self, sql, params=None):
+        self.__connect__()
+
+        self.cur.execute(
+            sql,
+            params
+        )
+
+        data = self.cur.fetchone()
+
+        columns = tuple(
+            desc.name
+            for desc in self.cur.description
+        )
+
+        self.con.commit()
+
+        self.__disconnect__()
+
+        return data, columns

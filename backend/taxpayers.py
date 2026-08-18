@@ -118,24 +118,6 @@ class Taxpayers:
                         "บุคคลธรรมดาต้องมี Owner Code"
                 }
 
-            # เช็ก Owner Code ซ้ำ
-            data, columns = self.db.fetch(
-                """
-                SELECT taxpayer_id
-                FROM public.taxpayers
-                WHERE owner_code = %s
-                """,
-                (owner_code,)
-            )
-
-            if len(data) > 0:
-
-                return {
-                    "Is Error": True,
-                    "Error Message":
-                        f"Owner Code '{owner_code}' ถูกใช้งานแล้ว"
-                }
-
             # บุคคลธรรมดาไม่ใช้ company_name
             company_name = None
 
@@ -167,7 +149,7 @@ class Taxpayers:
                     "taxpayer_type ต้องเป็น INDIVIDUAL หรือ COMPANY"
             }
 
-        self.db.execute(
+        data, columns = self.db.execute_returning(
             """
             INSERT INTO public.taxpayers (
                 taxpayer_type,
@@ -191,6 +173,7 @@ class Taxpayers:
                 %s,
                 %s
             )
+            RETURNING taxpayer_id
             """,
             (
                 taxpayer_type,
@@ -205,9 +188,14 @@ class Taxpayers:
             )
         )
 
+        taxpayer = dict(
+            zip(columns, data)
+        )
+
         return {
             "Is Error": False,
-            "Error Message": ""
+            "Error Message": "",
+            "taxpayer_id": taxpayer["taxpayer_id"]
         }
 
     # UPDATE TAXPAYER
@@ -224,24 +212,6 @@ class Taxpayers:
         group_code,
         is_active
     ):
-
-        # เช็กว่ามี taxpayer นี้จริงไหม
-        data, columns = self.db.fetch(
-            """
-            SELECT taxpayer_id
-            FROM public.taxpayers
-            WHERE taxpayer_id = %s
-            """,
-            (taxpayer_id,)
-        )
-
-        if len(data) == 0:
-
-            return {
-                "Is Error": True,
-                "Error Message":
-                    f"ไม่พบผู้เสียภาษีรหัส {taxpayer_id}"
-            }
 
         # บุคคลธรรมดา
         if taxpayer_type == "INDIVIDUAL":
@@ -388,7 +358,6 @@ class Taxpayers:
 
     # FIND TAXPAYER BY OWNER CODE
     def find_by_owner_code(self, owner_code):
-
         data, columns = self.db.fetch(
             """
             SELECT
@@ -408,13 +377,17 @@ class Taxpayers:
             FROM public.taxpayers
 
             WHERE owner_code = %s
+
+            ORDER BY taxpayer_id
             """,
             (owner_code,)
         )
 
-        if len(data) == 0:
-            return None
+        taxpayers = []
 
-        return dict(
-            zip(columns, data[0])
-        )
+        for row in data:
+            taxpayers.append(
+                dict(zip(columns, row))
+            )
+
+        return taxpayers
