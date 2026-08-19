@@ -193,6 +193,7 @@ def get_follow_up_logs():
             }
         )
 
+# Journey -------------------------------------------------------
 class LoginRequest(BaseModel):
     username: str
     password: str
@@ -288,7 +289,6 @@ class TaxpayerUpdate(BaseModel):
     address: str | None = None
     group_code: str
     is_active: bool
-
 @app.put("/api/taxpayers/{taxpayer_id}")
 def update_taxpayer(
     taxpayer_id: int,
@@ -318,36 +318,7 @@ def update_taxpayer(
         "message": "แก้ไขข้อมูลผู้เสียภาษีเรียบร้อยแล้ว"
     }
 
-@app.put("/api/taxpayer-year-records/{year_record_id}/remove")
-def remove_taxpayer_from_year(year_record_id: int):
-    try:
-        result = taxpayer_year_records_service.remove_from_year(
-            year_record_id
-        )
-
-        if result["Is Error"]:
-            raise HTTPException(
-                status_code=404,
-                detail=result["Error Message"]
-            )
-
-        return {
-            "success": True,
-            "message": "นำผู้เสียภาษีออกจากปีภาษีเรียบร้อยแล้ว"
-        }
-
-    except HTTPException:
-        raise
-
-    except Exception as error:
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "message": "ไม่สามารถนำผู้เสียภาษีออกจากปีภาษีได้",
-                "error": str(error)
-            }
-        )
-
+# ปิดการใช้งานผู้เสียภาษี (ไม่ลบข้อมูลจริง)
 @app.put("/api/taxpayers/{taxpayer_id}/deactivate")
 def deactivate_taxpayer(taxpayer_id: int):
     result = taxpayers_service.deactivate(
@@ -401,13 +372,28 @@ def create_taxpayer_year_record(
         if record is None:
             raise HTTPException(
                 status_code=500,
-                detail="สร้างข้อมูลปีภาษีสำเร็จ แต่ไม่พบข้อมูลที่สร้าง"
+                detail=
+                    "ดำเนินการสำเร็จ แต่ไม่พบข้อมูลปีภาษี"
             )
 
         return {
             "success": True,
-            "message":
-                "เพิ่มผู้เสียภาษีเข้าปีภาษีเรียบร้อยแล้ว",
+
+            "action": result.get(
+                "Action",
+                "CREATED"
+            ),
+
+            "message": (
+                "นำผู้เสียภาษีกลับเข้าปีภาษีเรียบร้อยแล้ว"
+                if result.get("Action") == "REACTIVATED"
+                else (
+                    "ผู้เสียภาษีอยู่ในปีภาษีนี้แล้ว"
+                    if result.get("Action") == "ALREADY_INCLUDED"
+                    else "เพิ่มผู้เสียภาษีเข้าปีภาษีเรียบร้อยแล้ว"
+                )
+            ),
+
             "data":
                 jsonable_encoder(record)
         }
@@ -421,10 +407,43 @@ def create_taxpayer_year_record(
             detail={
                 "message":
                     "ไม่สามารถเพิ่มผู้เสียภาษีเข้าปีภาษีได้",
+                "error":
+                    str(error)
+            }
+        )
+    
+# ลบผู้เสียภาษีออกจากปีภาษีนั้นๆ
+@app.put("/api/taxpayer-year-records/{year_record_id}/remove")
+def remove_taxpayer_from_year(year_record_id: int):
+    try:
+        result = taxpayer_year_records_service.remove_from_year(
+            year_record_id
+        )
+
+        if result["Is Error"]:
+            raise HTTPException(
+                status_code=404,
+                detail=result["Error Message"]
+            )
+
+        return {
+            "success": True,
+            "message": "นำผู้เสียภาษีออกจากปีภาษีเรียบร้อยแล้ว"
+
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as error:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": "ไม่สามารถนำผู้เสียภาษีออกจากปีภาษีได้",
                 "error": str(error)
             }
         )
-
+    
 class TaxAssessmentCreate(BaseModel):
     year_record_id: int
     tax_type: str

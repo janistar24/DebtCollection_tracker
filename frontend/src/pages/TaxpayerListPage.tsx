@@ -63,6 +63,9 @@ export default function TaxpayerListPage() {
   const [editMode, setEditMode] = useState(false)
   const [pendingEdits, setPendingEdits] = useState<Record<string, PendingEdit>>({})
   const [pendingNotes, setPendingNotes] = useState<Record<string, string>>({})
+  const [pendingAdds, setPendingAdds] = useState<Record<string, true>>({})
+  const [pendingRemoves, setPendingRemoves] = useState<Record<string, { taxpayer: Taxpayer; yearRecordId: string }>>({})
+  const [removedAssessmentCache, setRemovedAssessmentCache] = useState<Record<string, any>>({})
   const [reasonModal, setReasonModal] = useState<{ key: string; label: string; oldVal: number; newVal: number } | null>(null)
   const [reasonInput, setReasonInput] = useState('')
   const [saving, setSaving] = useState(false)
@@ -75,18 +78,16 @@ export default function TaxpayerListPage() {
   const [inlineSearch, setInlineSearch] = useState('')
   const [inlineSelected, setInlineSelected] = useState<Taxpayer | null>(null)
   const [inlineDropOpen, setInlineDropOpen] = useState(false)
-  const [inlineLand, setInlineLand] = useState('')
-  const [inlineSign, setInlineSign] = useState('')
-  const [inlineNote, setInlineNote] = useState('')
   const [inlineAdding, setInlineAdding] = useState(false)
   const inlineDropRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    const h = (e: MouseEvent) => {
+    const handleOutsideClick = (e: MouseEvent) => {
       if (inlineDropRef.current && !inlineDropRef.current.contains(e.target as Node)) setInlineDropOpen(false)
     }
-    document.addEventListener('mousedown', h)
-    return () => document.removeEventListener('mousedown', h)
+
+    document.addEventListener('mousedown', handleOutsideClick)
+    return () => document.removeEventListener('mousedown', handleOutsideClick)
   }, [])
 
   const filtered = useMemo(() => {
@@ -94,7 +95,7 @@ export default function TaxpayerListPage() {
       if (!isDirector && tp.group !== currentUser?.group) return false
       if (groupFilter !== 'all' && tp.group !== groupFilter) return false
       const s = search.toLowerCase()
-      if (s && !getTaxpayerName(tp).includes(s) && !tp.ownerCode.toLowerCase().includes(s) && !tp.phone.includes(s)) return false
+      if (s && !getTaxpayerName(tp).toLowerCase().includes(s) && !(tp.ownerCode ?? '').toLowerCase().includes(s) && !(tp.phone ?? '').toLowerCase().includes(s)) return false
       if (statusFilter !== 'all' && getPaymentStatus(tp, selectedYear) !== statusFilter) return false
       if (personTypeFilter === 'individual' && tp.type !== 'individual') return false
       if (personTypeFilter === 'company' && tp.type !== 'company') return false
@@ -102,7 +103,7 @@ export default function TaxpayerListPage() {
       if (!tp.assessments.find(a => a.year === selectedYear)) return false
       return true
     })
-  }, [taxpayers, search, groupFilter, statusFilter, selectedYear, currentUser, isDirector])
+  }, [taxpayers, search, groupFilter, statusFilter, personTypeFilter, selectedYear, currentUser, isDirector])
 
   const landTotal = filtered.reduce((s, tp) => s + (getAssessment(tp, selectedYear)?.landAmount ?? 0), 0)
   const signTotal = filtered.reduce((s, tp) => s + (getAssessment(tp, selectedYear)?.signAmount ?? 0), 0)
@@ -120,11 +121,10 @@ export default function TaxpayerListPage() {
     const key = `${tp.id}-${type}`
     const a = getAssessment(tp, selectedYear)
     const origVal = type === 'land' ? (a?.landAmount ?? 0) : (a?.signAmount ?? 0)
+
     if (newVal === origVal) {
-      // revert
       setPendingEdits(prev => { const n = { ...prev }; delete n[key]; return n })
     } else {
-      // show reason modal
       setReasonModal({ key, label: `${getTaxpayerName(tp)} — ${type === 'land' ? 'ภาษีที่ดินฯ' : 'ภาษีป้าย'}`, oldVal: origVal, newVal })
       setReasonInput(pendingEdits[key]?.reason ?? '')
     }
@@ -137,30 +137,92 @@ export default function TaxpayerListPage() {
     setReasonInput('')
   }
 
-  const handleSaveAll = async () => {
+const handleSaveAll = async () => {
   try {
     setSaving(true)
+    // ==========================================
+    // SAVE รายชื่อที่เพิ่มเข้าตาราง
+    // ==========================================
+    for (const taxpayerId of Object.keys(pendingAdds)) {
+      const tp = taxpayers.find(t => t.id === taxpayerId)
+      if (!tp) continue
+
+      const assessment = tp.assessments.find(a => a.year === selectedYear)
+      if (!assessment) continue
+
+      const yearResult = await createTaxpayerYearRecord({
+        taxpayer_id: Number(tp.id),
+        tax_year: selectedYear,
+        note: pendingNotes[tp.id] ?? null,
+        added_by: currentUser?.id ? Number(currentUser.id) : null
+      })
+
+      const yearRecordId = Number(yearResult.data.year_record_id)
+
+      // ถ้าเป็นคนเดิมที่เคยถูกนำออกจากปีนี้
+      // Assessment เดิมยังอยู่ใน DB ไม่สร้างใหม่
+      if (
+        yearResult.action === 'REACTIVATED' ||
+        yearResult.action === 'ALREADY_INCLUDED'
+      ) {
+  const currentAssessment = tp.assessments.find(a => a.year === selectedYear)
+  const cachedAssessment = removedAssessmentCache[tp.id]
+
+  updateTaxpayer({
+    ...tp,
+    assessments: [
+      ...tp.assessments.filter(a => a.year !== selectedYear),
+      {
+        ...currentAssessment,
+        yearRecordId: String(yearRecordId),
+        landAssessmentId: cachedAssessment?.landAssessmentId ?? currentAssessment?.landAssessmentId ?? '',
+        signAssessmentId: cachedAssessment?.signAssessmentId ?? currentAssessment?.signAssessmentId ?? '',
+        year: selectedYear,
+        landAmount: pendingEdits[`${tp.id}-land`]?.newVal ?? currentAssessment?.landAmount ?? cachedAssessment?.landAmount ?? 0,
+        signAmount: pendingEdits[`${tp.id}-sign`]?.newVal ?? currentAssessment?.signAmount ?? cachedAssessment?.signAmount ?? 0,
+        prevLandAmount: cachedAssessment?.prevLandAmount ?? currentAssessment?.prevLandAmount ?? 0,
+        prevSignAmount: cachedAssessment?.prevSignAmount ?? currentAssessment?.prevSignAmount ?? 0
+      }
+    ]
+  })
+
+  continue
+}
+
+      const landAmount = pendingEdits[`${tp.id}-land`]?.newVal ?? assessment.landAmount
+      const signAmount = pendingEdits[`${tp.id}-sign`]?.newVal ?? assessment.signAmount
+
+      await createTaxAssessment({
+        year_record_id: yearRecordId,
+        tax_type: 'LAND_BUILDING',
+        assessed_amount: landAmount,
+        previous_amount: assessment.prevLandAmount ?? 0,
+        change_reason: pendingEdits[`${tp.id}-land`]?.reason ?? null,
+        assessment_date: null,
+        annual_due_date: null,
+        created_by: currentUser?.id ? Number(currentUser.id) : null
+      })
+
+      await createTaxAssessment({
+        year_record_id: yearRecordId,
+        tax_type: 'SIGN',
+        assessed_amount: signAmount,
+        previous_amount: assessment.prevSignAmount ?? 0,
+        change_reason: pendingEdits[`${tp.id}-sign`]?.reason ?? null,
+        assessment_date: null,
+        annual_due_date: null,
+        created_by: currentUser?.id ? Number(currentUser.id) : null
+      })
+    }
 
     // รวม pending edits ของ LAND / SIGN ตาม taxpayer
-    const grouped: Record<
-      string,
-      { land?: number; sign?: number }
-    > = {}
+    const grouped: Record<string, { land?: number; sign?: number }> = {}
 
-    Object.entries(pendingEdits).forEach(
-      ([key, edit]) => {
-        const [id, type] = key.split('-') as [
-          string,
-          'land' | 'sign'
-        ]
-
-        if (!grouped[id]) {
-          grouped[id] = {}
-        }
-
-        grouped[id][type] = edit.newVal
-      }
-    )
+    Object.entries(pendingEdits).forEach(([key, edit]) => {
+      const [id, type] = key.split('-') as [string, 'land' | 'sign']
+      if (!grouped[id]) grouped[id] = {}
+      grouped[id][type] = edit.newVal
+    })
 
     // ==========================================
     // SAVE TAX ASSESSMENTS ลง PostgreSQL
@@ -168,185 +230,90 @@ export default function TaxpayerListPage() {
     for (const tp of taxpayers) {
       if (!grouped[tp.id]) continue
 
-      const assessment = tp.assessments.find(
-        a => a.year === selectedYear
-      )
+      // รายที่เพิ่งเพิ่ม ถูกจัดการด้านบนแล้ว
+      if (pendingAdds[tp.id]) continue
 
+      const assessment = tp.assessments.find(a => a.year === selectedYear)
       if (!assessment) continue
 
       if (!assessment.yearRecordId) {
-        throw new Error(
-          `ไม่พบ yearRecordId ของ ${getTaxpayerName(tp)}`
-        )
+        throw new Error(`ไม่พบ yearRecordId ของ ${getTaxpayerName(tp)}`)
       }
 
-      const landAmount =
-        grouped[tp.id].land !== undefined
-          ? grouped[tp.id].land!
-          : assessment.landAmount
+      const landAmount = grouped[tp.id].land !== undefined
+        ? grouped[tp.id].land!
+        : assessment.landAmount
 
-      const signAmount =
-        grouped[tp.id].sign !== undefined
-          ? grouped[tp.id].sign!
-          : assessment.signAmount
-
+      const signAmount = grouped[tp.id].sign !== undefined
+        ? grouped[tp.id].sign!
+        : assessment.signAmount
 
       // =========================
       // LAND_BUILDING
       // =========================
-
       if (grouped[tp.id].land !== undefined) {
-
-        // มี assessment เดิมอยู่แล้ว → UPDATE
         if (assessment.landAssessmentId) {
-
-          await updateTaxAssessment(
-            Number(assessment.landAssessmentId),
-            {
-              assessed_amount: landAmount,
-
-              previous_amount:
-                assessment.prevLandAmount ?? 0,
-
-              change_reason: pendingEdits[`${tp.id}-land`]?.reason ?? null,
-
-              assessment_date: null,
-
-              annual_due_date: null,
-
-              updated_by:
-                currentUser?.id
-                  ? Number(currentUser.id)
-                  : null
-            }
-          )
-
-        }
-
-        // ยังไม่มี LAND row → CREATE
-        else if (landAmount > 0) {
-
-          await createTaxAssessment({
-            year_record_id:
-              Number(assessment.yearRecordId),
-
-            tax_type:
-              'LAND_BUILDING',
-
-            assessed_amount:
-              landAmount,
-
-            previous_amount:
-              assessment.prevLandAmount ?? 0,
-
-            change_reason: null,
-
+          await updateTaxAssessment(Number(assessment.landAssessmentId), {
+            assessed_amount: landAmount,
+            previous_amount: assessment.prevLandAmount ?? 0,
+            change_reason: pendingEdits[`${tp.id}-land`]?.reason ?? null,
             assessment_date: null,
-
             annual_due_date: null,
-
-            created_by:
-              currentUser?.id
-                ? Number(currentUser.id)
-                : null
+            updated_by: currentUser?.id ? Number(currentUser.id) : null
+          })
+        } else {
+          await createTaxAssessment({
+            year_record_id: Number(assessment.yearRecordId),
+            tax_type: 'LAND_BUILDING',
+            assessed_amount: landAmount,
+            previous_amount: assessment.prevLandAmount ?? 0,
+            change_reason: pendingEdits[`${tp.id}-land`]?.reason ?? null,
+            assessment_date: null,
+            annual_due_date: null,
+            created_by: currentUser?.id ? Number(currentUser.id) : null
           })
         }
       }
-
 
       // =========================
       // SIGN
       // =========================
-
       if (grouped[tp.id].sign !== undefined) {
-
-        // มี assessment เดิมอยู่แล้ว → UPDATE
         if (assessment.signAssessmentId) {
-
-          await updateTaxAssessment(
-            Number(assessment.signAssessmentId),
-            {
-              assessed_amount:
-                signAmount,
-
-              previous_amount:
-                assessment.prevSignAmount ?? 0,
-
-              change_reason: pendingEdits[`${tp.id}-sign`]?.reason ?? null,
-
-              assessment_date: null,
-
-              annual_due_date: null,
-
-              updated_by:
-                currentUser?.id
-                  ? Number(currentUser.id)
-                  : null
-            }
-          )
-
-        }
-
-        // ยังไม่มี SIGN row → CREATE
-        else if (signAmount > 0) {
-
-          await createTaxAssessment({
-            year_record_id:
-              Number(assessment.yearRecordId),
-
-            tax_type:
-              'SIGN',
-
-            assessed_amount:
-              signAmount,
-
-            previous_amount:
-              assessment.prevSignAmount ?? 0,
-
-            change_reason: null,
-
+          await updateTaxAssessment(Number(assessment.signAssessmentId), {
+            assessed_amount: signAmount,
+            previous_amount: assessment.prevSignAmount ?? 0,
+            change_reason: pendingEdits[`${tp.id}-sign`]?.reason ?? null,
             assessment_date: null,
-
             annual_due_date: null,
-
-            created_by:
-              currentUser?.id
-                ? Number(currentUser.id)
-                : null
+            updated_by: currentUser?.id ? Number(currentUser.id) : null
+          })
+        } else {
+          await createTaxAssessment({
+            year_record_id: Number(assessment.yearRecordId),
+            tax_type: 'SIGN',
+            assessed_amount: signAmount,
+            previous_amount: assessment.prevSignAmount ?? 0,
+            change_reason: pendingEdits[`${tp.id}-sign`]?.reason ?? null,
+            assessment_date: null,
+            annual_due_date: null,
+            created_by: currentUser?.id ? Number(currentUser.id) : null
           })
         }
       }
 
-
       // ==========================================
       // UPDATE REACT STATE เดิมของ FIGMA
       // ==========================================
-
       const updated: Taxpayer = {
         ...tp,
-
         assessments: tp.assessments.map(a => {
-
-          if (a.year !== selectedYear) {
-            return a
-          }
+          if (a.year !== selectedYear) return a
 
           return {
             ...a,
-
-            ...(grouped[tp.id].land !== undefined
-              ? {
-                  landAmount:
-                    grouped[tp.id].land!
-                }
-              : {}),
-
-            ...(grouped[tp.id].sign !== undefined
-              ? {
-                  signAmount:
-                    grouped[tp.id].sign!
-                }
-              : {})
+            ...(grouped[tp.id].land !== undefined ? { landAmount: grouped[tp.id].land! } : {}),
+            ...(grouped[tp.id].sign !== undefined ? { signAmount: grouped[tp.id].sign! } : {})
           }
         })
       }
@@ -354,53 +321,49 @@ export default function TaxpayerListPage() {
       updateTaxpayer(updated)
     }
 
-
     // ==========================================
     // SAVE NOTE
     // ==========================================
-
     for (const tp of taxpayers) {
+      if (pendingNotes[tp.id] === undefined) continue
 
-      if (pendingNotes[tp.id] === undefined) {
-        continue
-      }
+      // รายที่เพิ่งเพิ่ม note ถูกส่งตอน createTaxpayerYearRecord แล้ว
+      if (pendingAdds[tp.id]) continue
 
-      const assessment = tp.assessments.find(
-        a => a.year === selectedYear
-      )
+      const assessment = tp.assessments.find(a => a.year === selectedYear)
+      if (!assessment?.yearRecordId) continue
 
-      if (!assessment?.yearRecordId) {
-        continue
-      }
+      await updateTaxpayerYearRecord(Number(assessment.yearRecordId), {
+        note: pendingNotes[tp.id],
+        is_included: true
+      })
 
-      await updateTaxpayerYearRecord(
-        Number(assessment.yearRecordId),
-        {
-          note: pendingNotes[tp.id],
-          is_included: true
-        }
-      )
-
-      // update React state เดิม
       updateTaxpayer({
         ...tp,
         notes: pendingNotes[tp.id]
       })
     }
 
+    // ==========================================
+    // SAVE รายชื่อที่นำออกจากปีภาษี
+    // ==========================================
+    // บันทึกการนำออกก่อนการเพิ่มกลับ
+    // เพื่อให้ backend เปลี่ยน is_included เป็น false ก่อน
+    for (const item of Object.values(pendingRemoves)) {
+      await removeTaxpayerFromYear(
+        Number(item.yearRecordId)
+      )
+    }
 
     setPendingEdits({})
     setPendingNotes({})
-
+    setPendingAdds({})
+    setPendingRemoves({})
     setSaveConfirm(false)
     setEditMode(false)
 
   } catch (error) {
-
-    console.error(
-      'Save annual taxpayer error:',
-      error
-    )
+    console.error('Save annual taxpayer error:', error)
 
     alert(
       error instanceof Error
@@ -409,264 +372,197 @@ export default function TaxpayerListPage() {
     )
 
   } finally {
-
     setSaving(false)
   }
 }
-const handleRemove = async (
-  tp: Taxpayer
-) => {
 
-  try {
-
-    const assessment =
-      tp.assessments.find(
-        a => a.year === selectedYear
-      )
-
-    if (!assessment?.yearRecordId) {
-
-      throw new Error(
-        `ไม่พบข้อมูลปีภาษีของ ${getTaxpayerName(tp)}`
-      )
-    }
-
-    await removeTaxpayerFromYear(
-      Number(assessment.yearRecordId)
-    )
-
-    const updated: Taxpayer = {
+const handleRemove = (tp: Taxpayer) => {
+  if (pendingAdds[tp.id]) {
+    updateTaxpayer({
       ...tp,
+      assessments: tp.assessments.filter(a => a.year !== selectedYear)
+    })
 
-      assessments:
-        tp.assessments.filter(
-          a => a.year !== selectedYear
-        )
-    }
+    setPendingAdds(prev => {
+      const next = { ...prev }
+      delete next[tp.id]
+      return next
+    })
 
-    updateTaxpayer(updated)
+    setPendingEdits(prev => {
+      const next = { ...prev }
+      delete next[`${tp.id}-land`]
+      delete next[`${tp.id}-sign`]
+      return next
+    })
+
+    setPendingNotes(prev => {
+      const next = { ...prev }
+      delete next[tp.id]
+      return next
+    })
 
     setRemoveTarget(null)
-
-  } catch (error) {
-
-    console.error(
-      'Remove taxpayer from year error:',
-      error
-    )
-
-    alert(
-      error instanceof Error
-        ? error.message
-        : 'ไม่สามารถนำรายชื่อออกจากปีภาษีได้'
-    )
+    return
   }
+
+  const assessment = tp.assessments.find(a => a.year === selectedYear)
+
+  if (!assessment?.yearRecordId) {
+    alert(`ไม่พบข้อมูลปีภาษีของ ${getTaxpayerName(tp)}`)
+    return
+  }
+
+  // จำข้อมูล assessment เดิมทั้งหมดไว้
+  setRemovedAssessmentCache(prev => ({
+    ...prev,
+    [tp.id]: assessment
+  }))
+
+  setPendingRemoves(prev => ({
+    ...prev,
+    [tp.id]: {
+      taxpayer: tp,
+      yearRecordId: assessment.yearRecordId
+    }
+  }))
+
+  setPendingEdits(prev => {
+    const next = { ...prev }
+    delete next[`${tp.id}-land`]
+    delete next[`${tp.id}-sign`]
+    return next
+  })
+
+  setPendingNotes(prev => {
+    const next = { ...prev }
+    delete next[tp.id]
+    return next
+  })
+
+  updateTaxpayer({
+    ...tp,
+    assessments: tp.assessments.filter(a => a.year !== selectedYear)
+  })
+
+  setRemoveTarget(null)
 }
 
-  // ผู้เสียภาษีที่ค้นหาได้ในระบบ (ยังไม่มีในปีนี้) สำหรับ Searchable Dropdown
-  const inlineCandidates = useMemo(() => {
-    if (!inlineSearch.trim()) return []
-    const s = inlineSearch.toLowerCase()
-    return taxpayers.filter(tp => {
-      if (!isDirector && tp.group !== currentUser?.group) return false
-      const name = getTaxpayerName(tp).toLowerCase()
-      return name.includes(s) || tp.ownerCode.toLowerCase().includes(s)
-    }).slice(0, 8)
-  }, [inlineSearch, taxpayers, isDirector, currentUser])
+  // 1) รายชื่อที่อยู่ในปีที่เลือกอยู่แล้ว
+  const existingThisYear = useMemo(() => {
+    return new Set(
+      taxpayers
+        .filter(tp => tp.assessments.some(a => a.year === selectedYear))
+        .map(tp => tp.id)
+    )
+  }, [taxpayers, selectedYear])
 
-  // รายชื่อที่มีในปีนี้แล้ว (ป้องกัน duplicate)
-  const existingThisYear = useMemo(
-    () => new Set(taxpayers.filter(tp => tp.assessments.some(a => a.year === selectedYear)).map(tp => tp.id)),
-    [taxpayers, selectedYear]
-  )
+  // 2) รายชื่อที่ค้นหาได้
+  const inlineCandidates = useMemo(() => {
+    const searchText = inlineSearch.trim().toLowerCase()
+    if (!searchText) return []
+
+    return taxpayers
+      .filter(tp => {
+        if (!isDirector && tp.group !== currentUser?.group) return false
+        if (existingThisYear.has(tp.id)) return false
+
+        const name = getTaxpayerName(tp).toLowerCase()
+        const ownerCode = (tp.ownerCode ?? '').toLowerCase()
+        const phone = (tp.phone ?? '').toLowerCase()
+
+        return name.includes(searchText) || ownerCode.includes(searchText) || phone.includes(searchText)
+      })
+      .sort((a, b) => {
+        const nameA = getTaxpayerName(a).toLowerCase()
+        const nameB = getTaxpayerName(b).toLowerCase()
+
+        const aStarts = nameA.startsWith(searchText)
+        const bStarts = nameB.startsWith(searchText)
+
+        if (aStarts && !bStarts) return -1
+        if (!aStarts && bStarts) return 1
+        return nameA.localeCompare(nameB, 'th')
+      })
+      .slice(0, 8)
+
+  }, [inlineSearch, taxpayers, isDirector, currentUser, existingThisYear])
 
   const handleInlineSelect = (tp: Taxpayer) => {
     setInlineSelected(tp)
     setInlineSearch(getTaxpayerName(tp))
     setInlineDropOpen(false)
-    // auto-fill ยอดปีก่อน
-    const prev = tp.assessments.find(a => a.year === selectedYear - 1)
-    setInlineLand(prev?.landAmount ? String(prev.landAmount) : '')
-    setInlineSign(prev?.signAmount ? String(prev.signAmount) : '')
   }
 
-  const handleInlineAdd = async () => {
+const handleInlineAdd = () => {
+  if (!inlineSelected) return
 
-    if (!inlineSelected) return
+  const taxpayerId = inlineSelected.id
 
-    try {
+  // ถ้าเพิ่งลบออกจากตารางใน edit session นี้
+  // ให้นำ assessment เดิมจาก cache กลับมาใช้
+  const removedAssessment = removedAssessmentCache[taxpayerId]
 
-      setInlineAdding(true)
+  // ถ้าไม่เคยมีข้อมูลในปีนี้ ให้ดึงข้อมูลปีล่าสุดก่อนหน้ามาเป็นค่าเริ่มต้น
+  const previousAssessment = [...inlineSelected.assessments]
+    .filter(a => a.year < selectedYear)
+    .sort((a, b) => b.year - a.year)[0]
 
-      const land =
-        parseFloat(inlineLand) || 0
+  const sourceAssessment =
+    removedAssessment ?? previousAssessment
 
-      const sign =
-        parseFloat(inlineSign) || 0
+  const landAmount =
+    sourceAssessment?.landAmount ?? 0
 
-      const prevAssess =
-        inlineSelected.assessments.find(
-          a => a.year === selectedYear - 1
-        )
+  const signAmount =
+    sourceAssessment?.signAmount ?? 0
 
+  const updated: Taxpayer = {
+    ...inlineSelected,
+    assessments: [
+      ...inlineSelected.assessments.filter(
+        a => a.year !== selectedYear
+      ),
+      {
+        yearRecordId:
+          removedAssessment?.yearRecordId ?? '',
 
-      // 1. เพิ่มผู้เสียภาษีเข้าปีภาษี
-      const yearResult =
-        await createTaxpayerYearRecord({
-          taxpayer_id:
-            Number(inlineSelected.id),
+        landAssessmentId:
+          removedAssessment?.landAssessmentId ?? '',
 
-          tax_year:
-            selectedYear,
+        signAssessmentId:
+          removedAssessment?.signAssessmentId ?? '',
 
-          note:
-            inlineNote || null,
+        year: selectedYear,
+        landAmount,
+        signAmount,
 
-          added_by:
-            currentUser?.id
-              ? Number(currentUser.id)
-              : null
-        })
+        prevLandAmount: removedAssessment
+          ? removedAssessment.prevLandAmount ?? 0
+          : previousAssessment?.landAmount ?? 0,
 
-
-      const yearRecordId =
-        Number(
-          yearResult.data.year_record_id
-        )
-
-
-      // 2. สร้าง LAND_BUILDING
-      if (land > 0) {
-
-        await createTaxAssessment({
-          year_record_id:
-            yearRecordId,
-
-          tax_type:
-            'LAND_BUILDING',
-
-          assessed_amount:
-            land,
-
-          previous_amount:
-            prevAssess?.landAmount ?? 0,
-
-          change_reason:
-            null,
-
-          assessment_date:
-            null,
-
-          annual_due_date:
-            null,
-
-          created_by:
-            currentUser?.id
-              ? Number(currentUser.id)
-              : null
-        })
+        prevSignAmount: removedAssessment
+          ? removedAssessment.prevSignAmount ?? 0
+          : previousAssessment?.signAmount ?? 0
       }
-
-
-      // 3. สร้าง SIGN
-      if (sign > 0) {
-
-        await createTaxAssessment({
-          year_record_id:
-            yearRecordId,
-
-          tax_type:
-            'SIGN',
-
-          assessed_amount:
-            sign,
-
-          previous_amount:
-            prevAssess?.signAmount ?? 0,
-
-          change_reason:
-            null,
-
-          assessment_date:
-            null,
-
-          annual_due_date:
-            null,
-
-          created_by:
-            currentUser?.id
-              ? Number(currentUser.id)
-              : null
-        })
-      }
-
-
-      // 4. อัปเดต React state หลัง DB สำเร็จ
-      const updated: Taxpayer = {
-        ...inlineSelected,
-
-        notes:
-          inlineNote ||
-          inlineSelected.notes,
-
-        assessments: [
-          ...inlineSelected.assessments.filter(
-            a => a.year !== selectedYear
-          ),
-
-          {
-            yearRecordId:
-              String(yearRecordId),
-
-            landAssessmentId: '',
-            signAssessmentId: '',
-
-            year:
-              selectedYear,
-
-            landAmount:
-              land,
-
-            signAmount:
-              sign,
-
-            prevLandAmount:
-              prevAssess?.landAmount ?? 0,
-
-            prevSignAmount:
-              prevAssess?.signAmount ?? 0
-          }
-        ]
-      }
-
-      updateTaxpayer(updated)
-
-
-      // reset form
-      setInlineSelected(null)
-      setInlineSearch('')
-      setInlineLand('')
-      setInlineSign('')
-      setInlineNote('')
-
-    } catch (error) {
-
-      console.error(
-        'Add taxpayer to year error:',
-        error
-      )
-
-      alert(
-        error instanceof Error
-          ? error.message
-          : 'เพิ่มผู้เสียภาษีเข้าปีภาษีไม่สำเร็จ'
-      )
-
-    } finally {
-
-      setInlineAdding(false)
-    }
+    ]
   }
+
+  // นำผู้เสียภาษีกลับมาแสดงในตาราง
+  updateTaxpayer(updated)
+
+  // เก็บ pendingAdds แม้เป็นคนเดียวกับ pendingRemoves
+  // ลบ -> เพิ่ม จึงนับเป็น 2 การเปลี่ยนแปลง
+  setPendingAdds(prev => ({
+    ...prev,
+    [taxpayerId]: true
+  }))
+
+  // ล้างช่องค้นหาหลังเพิ่มสำเร็จ
+  setInlineSearch('')
+  setInlineSelected(null)
+  setInlineDropOpen(false)
+}
 
   const diff = (curr: number, prev: number) => {
     const d = curr - prev
@@ -674,11 +570,18 @@ const handleRemove = async (
     return <span className="status-badge" style={{ fontSize: 11, padding: '2px 8px', ...(d > 0 ? { background: '#e8fdf4', color: '#1a8f5a' } : { background: '#fff1f0', color: '#c0392b' }) }}>{d > 0 ? '+' : ''}{formatCurrency(d)}</span>
   }
 
-  const hasPending = Object.keys(pendingEdits).length > 0 || Object.values(pendingNotes).some((v, i) => {
-    const id = Object.keys(pendingNotes)[i]
+  const changedNoteCount = Object.entries(pendingNotes).filter(([id, value]) => {
     const tp = taxpayers.find(t => t.id === id)
-    return v !== (tp?.notes ?? '')
-  })
+    return value !== (tp?.notes ?? '')
+  }).length
+
+  const pendingCount =
+    Object.keys(pendingEdits).length +
+    Object.keys(pendingAdds).length +
+    Object.keys(pendingRemoves).length +
+    changedNoteCount
+
+  const hasPending = pendingCount > 0
 
   return (
     <div style={{ padding: 24, maxWidth: 1400 }}>
@@ -686,23 +589,27 @@ const handleRemove = async (
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
         <input className="input-field" style={{ width: 240 }} placeholder="🔍 ค้นหาชื่อ, รหัส, เบอร์โทร"
           value={search} onChange={e => setSearch(e.target.value)} />
+
         {isDirector && (
           <select className="input-field" style={{ width: 140 }} value={groupFilter} onChange={e => setGroupFilter(e.target.value)}>
             <option value="all">ทุกกลุ่ม</option>
             {GROUPS.map(g => <option key={g} value={g}>กลุ่ม {g}</option>)}
           </select>
         )}
+
         <select className="input-field" style={{ width: 150 }} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
           <option value="all">ทุกสถานะ</option>
           <option value="unpaid">ยังไม่ชำระ</option>
           <option value="partial">ชำระบางส่วน</option>
           <option value="paid">ชำระครบ</option>
         </select>
+
         <select className="input-field" style={{ width: 160 }} value={personTypeFilter} onChange={e => setPersonTypeFilter(e.target.value)}>
           <option value="all">ทุกประเภทบุคคล</option>
           <option value="individual">บุคคลธรรมดา</option>
           <option value="company">นิติบุคคล / บริษัท</option>
         </select>
+
         <span style={{ fontSize: 13, color: '#a89cc8' }}>{filtered.length} รายการ</span>
 
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -710,26 +617,35 @@ const handleRemove = async (
             <button className="btn-secondary no-print" onClick={() => window.print()} style={{ fontSize: 12 }}>🖨 พิมพ์</button>
             <button className="btn-secondary no-print" onClick={() => exportExcel(filtered, selectedYear, groupFilter)} style={{ fontSize: 12 }}>📥 Export Excel</button>
           </>}
+
           {!isDirector && isCurrentYear && !editMode && (
             <button className="btn-secondary" onClick={() => { setEditMode(true); setPendingEdits({}) }}
               style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
               ✏️ แก้ไขข้อมูล
             </button>
           )}
+
           {editMode && (
             <>
               <div style={{ padding: '6px 12px', background: '#fff8e6', border: '1px solid rgba(230,160,0,0.3)', borderRadius: 10, fontSize: 12, color: '#8a5a00', fontWeight: 600 }}>
                 ✏️ กำลังแก้ไขข้อมูลปีภาษี {selectedYear}
-                {hasPending && <span style={{ marginLeft: 8, color: '#7c5cbf' }}>· {Object.keys(pendingEdits).length} รายการรอบันทึก</span>}
+                {hasPending && <span style={{ marginLeft: 8, color: '#7c5cbf' }}>· {pendingCount} รายการรอบันทึก</span>}
               </div>
-              <button className="btn-secondary" onClick={() => { setEditMode(false); setPendingEdits({}); setPendingNotes({}) }} style={{ fontSize: 13 }}>ยกเลิก</button>
+
+              <button className="btn-secondary" onClick={() => { setEditMode(false); setPendingEdits({}); setPendingNotes({}) }} style={{ fontSize: 13 }}>
+                ยกเลิก
+              </button>
+
               <button className="btn-primary" onClick={() => setSaveConfirm(true)} disabled={!hasPending} style={{ fontSize: 13 }}>
                 💾 บันทึกการแก้ไข
               </button>
             </>
           )}
+
           {!editMode && !isDirector && (
-            <button className="btn-primary" onClick={() => navigate('/taxpayers/new')} style={{ fontSize: 13 }}>➕ เพิ่มผู้เสียภาษีรายใหม่</button>
+            <button className="btn-primary" onClick={() => navigate('/taxpayers/new')} style={{ fontSize: 13 }}>
+              ➕ เพิ่มผู้เสียภาษีรายใหม่
+            </button>
           )}
         </div>
       </div>
@@ -745,16 +661,18 @@ const handleRemove = async (
         <div style={{ textAlign: 'center', fontSize: 15, fontWeight: 700 }}>
           รายละเอียดผู้ชำระภาษีที่ดินและสิ่งปลูกสร้าง - ภาษีป้าย
         </div>
+
         <div style={{ textAlign: 'center', fontSize: 13, marginTop: 4 }}>
           ประจำปี {selectedYear} {groupFilter !== 'all' ? `อักษร ${groupFilter}` : '(ทุกกลุ่ม)'}
         </div>
+
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginTop: 8, color: '#555' }}>
           <span>พิมพ์วันที่: {new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
           <span>จำนวน {filtered.length} ราย</span>
         </div>
       </div>
 
-      <div className="glass-card" style={{ padding: 0, overflow: 'hidden' }}>
+      <div className="glass-card" style={{ padding: 0, overflow: 'visible' }}>
         {filtered.length === 0 && !editMode ? (
           <EmptyState icon="🔍" title="ไม่พบข้อมูล" sub="ลองเปลี่ยนเงื่อนไขการค้นหา" />
         ) : (
@@ -772,6 +690,7 @@ const handleRemove = async (
                   <th style={TH}></th>
                   {editMode && <th style={{ ...TH, width: 40 }}></th>}
                 </tr>
+
                 <tr style={{ background: 'rgba(240,236,251,0.35)' }}>
                   <th style={TH} colSpan={3}></th>
                   {['ปีนี้', 'ปีก่อน', 'เพิ่ม/ลด'].map(h => <th key={`l${h}`} style={{ ...TH, fontWeight: 500, color: '#8873b5', fontSize: 11 }}>{h}</th>)}
@@ -779,6 +698,7 @@ const handleRemove = async (
                   <th style={TH} colSpan={editMode ? 4 : 3}></th>
                 </tr>
               </thead>
+
               <tbody>
                 {filtered.map((tp, i) => {
                   const a = getAssessment(tp, selectedYear)
@@ -795,6 +715,7 @@ const handleRemove = async (
                       <td style={TD}>{i + 1}</td>
                       <td style={{ ...TD, fontFamily: 'monospace', fontSize: 11, color: '#7c5cbf' }}>{tp.ownerCode}</td>
                       <td style={{ ...TD, fontWeight: 500, color: '#2d2545', whiteSpace: 'nowrap' }}>{getTaxpayerName(tp)}</td>
+
                       {/* land */}
                       <td style={{ ...TD, textAlign: 'right', background: landEdited ? 'rgba(124,92,191,0.06)' : undefined }}>
                         {editMode && isCurrentYear ? (
@@ -803,8 +724,10 @@ const handleRemove = async (
                             style={{ width: 90, textAlign: 'right', background: landEdited ? 'rgba(124,92,191,0.1)' : 'rgba(255,255,255,0.7)', border: `1px solid ${landEdited ? 'rgba(124,92,191,0.5)' : 'rgba(180,165,230,0.35)'}`, borderRadius: 8, padding: '4px 8px', fontFamily: "'Sarabun',sans-serif", fontSize: 13, outline: 'none' }} />
                         ) : <span>฿{formatCurrency(curLand)}</span>}
                       </td>
+
                       <td style={{ ...TD, textAlign: 'right', color: '#a89cc8' }}>฿{formatCurrency(a?.prevLandAmount ?? 0)}</td>
                       <td style={{ ...TD, textAlign: 'right' }}>{diff(curLand, a?.prevLandAmount ?? 0)}</td>
+
                       {/* sign */}
                       <td style={{ ...TD, textAlign: 'right', background: signEdited ? 'rgba(124,92,191,0.06)' : undefined }}>
                         {editMode && isCurrentYear ? (
@@ -813,8 +736,10 @@ const handleRemove = async (
                             style={{ width: 90, textAlign: 'right', background: signEdited ? 'rgba(124,92,191,0.1)' : 'rgba(255,255,255,0.7)', border: `1px solid ${signEdited ? 'rgba(124,92,191,0.5)' : 'rgba(180,165,230,0.35)'}`, borderRadius: 8, padding: '4px 8px', fontFamily: "'Sarabun',sans-serif", fontSize: 13, outline: 'none' }} />
                         ) : <span>฿{formatCurrency(curSign)}</span>}
                       </td>
+
                       <td style={{ ...TD, textAlign: 'right', color: '#a89cc8' }}>฿{formatCurrency(a?.prevSignAmount ?? 0)}</td>
                       <td style={{ ...TD, textAlign: 'right' }}>{diff(curSign, a?.prevSignAmount ?? 0)}</td>
+
                       <td style={{ ...TD, maxWidth: 160 }}>
                         {editMode && isCurrentYear ? (
                           <input type="text" defaultValue={pendingNotes[tp.id] ?? tp.notes ?? ''}
@@ -825,10 +750,15 @@ const handleRemove = async (
                           <span style={{ fontSize: 11, color: '#a89cc8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block', maxWidth: 140 }}>{tp.notes ?? '-'}</span>
                         )}
                       </td>
+
                       <td style={TD}><StatusBadge status={payStat} size="sm" /></td>
+
                       <td style={TD}>
-                        <button className="btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }} onClick={() => navigate(`/taxpayers/${tp.id}`)}>ดู →</button>
+                        <button className="btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }} onClick={() => navigate(`/taxpayers/${tp.id}`)}>
+                          ดู →
+                        </button>
                       </td>
+
                       {editMode && (
                         <td style={{ ...TD, textAlign: 'center' }}>
                           <button onClick={() => setRemoveTarget(tp)} title="นำออกจากปีนี้" style={{
@@ -845,90 +775,85 @@ const handleRemove = async (
                 {/* Inline add row — Searchable Dropdown */}
                 {editMode && isCurrentYear && (
                   <tr style={{ background: 'rgba(240,236,251,0.35)', borderTop: '2px dashed rgba(124,92,191,0.25)' }}>
-                    <td style={TD} colSpan={3}>
-                      <div style={{ fontSize: 11, color: '#7c5cbf', marginBottom: 6, fontWeight: 600 }}>+ เพิ่มรายการ</div>
-                      <div ref={inlineDropRef} style={{ position: 'relative', width: 240 }}>
-                        <input
-                          className="input-field"
-                          placeholder="ค้นหาและเลือกผู้เสียภาษี"
-                          value={inlineSearch}
-                          onChange={e => { setInlineSearch(e.target.value); setInlineSelected(null); setInlineDropOpen(true) }}
-                          onFocus={() => inlineSearch && setInlineDropOpen(true)}
-                          style={{ fontSize: 12, padding: '6px 10px', width: '100%' }}
-                        />
-                        {inlineDropOpen && (
-                          <div style={{
-                            position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 999, marginTop: 4,
-                            background: 'rgba(255,255,255,0.97)', backdropFilter: 'blur(16px)',
-                            border: '1px solid rgba(196,181,240,0.4)', borderRadius: 12,
-                            boxShadow: '0 8px 24px rgba(124,92,191,0.12)', overflow: 'hidden'
-                          }}>
-                            {inlineCandidates.length === 0 ? (
-                              <div style={{ padding: '12px 14px', fontSize: 12, color: '#a89cc8', textAlign: 'center' }}>
-                                <div style={{ marginBottom: 8 }}>ไม่พบผู้เสียภาษีในระบบ</div>
-                                <button className="btn-ghost" style={{ fontSize: 11, padding: '4px 10px', color: '#7c5cbf' }}
-                                  onMouseDown={() => navigate('/taxpayers/new')}>
-                                  + เพิ่มผู้เสียภาษีรายใหม่
-                                </button>
-                              </div>
-                            ) : inlineCandidates.map(tp => {
-                              const alreadyIn = existingThisYear.has(tp.id)
-                              return (
-                                <div key={tp.id}
-                                  onMouseDown={() => !alreadyIn && handleInlineSelect(tp)}
-                                  style={{
-                                    padding: '10px 14px', borderBottom: '1px solid rgba(200,190,240,0.15)',
-                                    cursor: alreadyIn ? 'default' : 'pointer', opacity: alreadyIn ? 0.5 : 1,
-                                    background: 'transparent', transition: 'background 0.1s'
-                                  }}
-                                  onMouseEnter={e => { if (!alreadyIn) (e.currentTarget as HTMLElement).style.background = 'rgba(240,236,251,0.6)' }}
-                                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}>
-                                  <div style={{ fontSize: 13, fontWeight: 600, color: '#2d2545' }}>{getTaxpayerName(tp)}</div>
-                                  <div style={{ fontSize: 11, color: '#a89cc8', display: 'flex', gap: 8, marginTop: 2 }}>
-                                    {tp.ownerCode && <span style={{ fontFamily: 'monospace' }}>{tp.ownerCode}</span>}
-                                    <span>{tp.type === 'company' ? 'นิติบุคคล' : 'บุคคลธรรมดา'}</span>
-                                    {alreadyIn && <span style={{ color: '#7c5cbf', fontWeight: 600 }}>มีอยู่ในปีภาษี {selectedYear} แล้ว</span>}
-                                  </div>
-                                </div>
-                              )
-                            })}
-                          </div>
-                        )}
+                    <td style={TD} colSpan={editMode ? 13 : 12}>
+                      <div style={{ fontSize: 11, color: '#7c5cbf', marginBottom: 3, fontWeight: 600 }}>+ เพิ่มรายการ</div>
+                      <div style={{ fontSize: 10, color: '#a89cc8', marginBottom: 7 }}>
+                        เลือกผู้เสียภาษีแล้วเพิ่มเข้าตาราง ระบบจะใช้ยอดภาษีล่าสุดเป็นค่าเริ่มต้น
                       </div>
-                      {inlineSelected && (
-                        <div style={{ marginTop: 4, fontSize: 11, color: '#1a8f5a', fontWeight: 600 }}>
-                          ✓ เลือก: {getTaxpayerName(inlineSelected)} · {inlineSelected.type === 'company' ? 'นิติบุคคล' : 'บุคคลธรรมดา'}
+
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                        <div ref={inlineDropRef} style={{ width: 320, maxWidth: '100%' }}>
+                          <input
+                            className="input-field"
+                            placeholder="ค้นหาและเลือกผู้เสียภาษี"
+                            value={inlineSearch}
+                            onChange={e => { setInlineSearch(e.target.value); setInlineSelected(null); setInlineDropOpen(true) }}
+                            onFocus={() => { if (inlineSearch) setInlineDropOpen(true) }}
+                            style={{ fontSize: 12, padding: '6px 10px', width: '100%' }}
+                          />
+
+                          {inlineDropOpen && (
+                            <div style={{
+                              marginTop: 4, width: '100%', maxHeight: 230, overflowY: 'auto',
+                              background: 'rgba(255,255,255,0.97)', backdropFilter: 'blur(16px)',
+                              border: '1px solid rgba(196,181,240,0.4)', borderRadius: 12,
+                              boxShadow: '0 8px 20px rgba(124,92,191,0.10)'
+                            }}>
+                              {inlineCandidates.length === 0 ? (
+                                <div style={{ padding: '12px 14px', fontSize: 12, color: '#a89cc8', textAlign: 'center' }}>
+                                  <div style={{ marginBottom: 8 }}>ไม่พบผู้เสียภาษีในระบบ</div>
+                                  <button className="btn-ghost" style={{ fontSize: 11, padding: '4px 10px', color: '#7c5cbf' }}
+                                    onMouseDown={() => navigate('/taxpayers/new')}>
+                                    + เพิ่มผู้เสียภาษีรายใหม่
+                                  </button>
+                                </div>
+                              ) : (
+                                inlineCandidates.map(tp => (
+                                  <div
+                                    key={tp.id}
+                                    onMouseDown={() => handleInlineSelect(tp)}
+                                    style={{
+                                      padding: '10px 14px', borderBottom: '1px solid rgba(200,190,240,0.15)',
+                                      cursor: 'pointer', background: 'transparent', transition: 'background 0.1s'
+                                    }}
+                                    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(240,236,251,0.6)' }}
+                                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+                                  >
+                                    <div style={{ fontSize: 13, fontWeight: 600, color: '#2d2545' }}>
+                                      {getTaxpayerName(tp)}
+                                    </div>
+
+                                    <div style={{ fontSize: 11, color: '#a89cc8', display: 'flex', gap: 8, marginTop: 2 }}>
+                                      {tp.ownerCode && <span style={{ fontFamily: 'monospace' }}>{tp.ownerCode}</span>}
+                                      <span>{tp.type === 'company' ? 'นิติบุคคล' : 'บุคคลธรรมดา'}</span>
+                                    </div>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          )}
+
+                          {inlineSelected && (
+                            <div style={{ marginTop: 5, fontSize: 11, color: '#1a8f5a', fontWeight: 600 }}>
+                              ✓ เลือก: {getTaxpayerName(inlineSelected)} · {inlineSelected.type === 'company' ? 'นิติบุคคล' : 'บุคคลธรรมดา'}
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </td>
-                    <td style={TD}>
-                      <input className="input-field" placeholder="ยอดที่ดินฯ" type="number" value={inlineLand}
-                        onChange={e => setInlineLand(e.target.value)} disabled={!inlineSelected}
-                        style={{ fontSize: 12, padding: '6px 8px', width: 90, opacity: inlineSelected ? 1 : 0.4 }} />
-                    </td>
-                    <td style={TD} colSpan={2}></td>
-                    <td style={TD}>
-                      <input className="input-field" placeholder="ยอดป้าย" type="number" value={inlineSign}
-                        onChange={e => setInlineSign(e.target.value)} disabled={!inlineSelected}
-                        style={{ fontSize: 12, padding: '6px 8px', width: 90, opacity: inlineSelected ? 1 : 0.4 }} />
-                    </td>
-                    <td style={TD} colSpan={2}></td>
-                    <td style={TD}>
-                      <input className="input-field" placeholder="หมายเหตุ" value={inlineNote}
-                        onChange={e => setInlineNote(e.target.value)} disabled={!inlineSelected}
-                        style={{ fontSize: 12, padding: '6px 8px', width: 110, opacity: inlineSelected ? 1 : 0.4 }} />
-                    </td>
-                    <td style={TD} colSpan={editMode ? 3 : 2}>
-                      {inlineSelected && (
-                        <button className="btn-primary" onClick={handleInlineAdd} disabled={inlineAdding || (!inlineLand && !inlineSign)}
-                          style={{ fontSize: 12, padding: '6px 14px' }}>
-                          {inlineAdding ? '...' : '+ เพิ่ม'}
+
+                        <button
+                          className="btn-primary"
+                          onClick={handleInlineAdd}
+                          disabled={!inlineSelected || inlineAdding}
+                          style={{ fontSize: 12, padding: '6px 14px', whiteSpace: 'nowrap' }}
+                        >
+                          {inlineAdding ? '...' : '+ เพิ่มเข้าตาราง'}
                         </button>
-                      )}
+                      </div>
                     </td>
                   </tr>
                 )}
               </tbody>
+
               <tfoot>
                 <tr style={{ background: 'rgba(240,236,251,0.5)', fontWeight: 700 }}>
                   <td colSpan={3} style={{ ...TD, color: '#7c5cbf' }}>รวม {filtered.length} ราย</td>
@@ -956,6 +881,7 @@ const handleRemove = async (
               <span>ส่วนต่าง: <strong style={{ color: reasonModal.newVal >= reasonModal.oldVal ? '#1a8f5a' : '#c0392b' }}>{reasonModal.newVal >= reasonModal.oldVal ? '+' : ''}{formatCurrency(reasonModal.newVal - reasonModal.oldVal)}</strong></span>
             </div>
           </div>
+
           <div style={{ marginBottom: 20 }}>
             <label style={LBL}>เหตุผลที่ยอดเพิ่ม/ลด *</label>
             <select className="input-field" value={reasonInput} onChange={e => setReasonInput(e.target.value)}>
@@ -968,6 +894,7 @@ const handleRemove = async (
               <option value="อื่น ๆ">อื่น ๆ</option>
             </select>
           </div>
+
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
             <button className="btn-secondary" onClick={() => setReasonModal(null)}>ยกเลิก</button>
             <button className="btn-primary" onClick={confirmReason} disabled={!reasonInput}>ยืนยัน</button>
@@ -979,8 +906,9 @@ const handleRemove = async (
       {saveConfirm && (
         <Modal title="ยืนยันบันทึกการแก้ไข" onClose={() => setSaveConfirm(false)} maxWidth="420px">
           <div style={{ marginBottom: 20, fontSize: 14, color: '#6b5b95' }}>
-            จะบันทึก <strong>{Object.keys(pendingEdits).length} รายการ</strong> ที่แก้ไขในปีภาษี {selectedYear} ใช่ไหม?
+            จะบันทึก <strong>{pendingCount} รายการ</strong> ที่แก้ไขในปีภาษี {selectedYear} ใช่ไหม?
           </div>
+
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
             <button className="btn-secondary" onClick={() => setSaveConfirm(false)}>ยกเลิก</button>
             <button className="btn-primary" onClick={handleSaveAll} disabled={saving}>
@@ -997,16 +925,21 @@ const handleRemove = async (
             <div style={{ fontSize: 15, fontWeight: 700, color: '#2d2545' }}>{getTaxpayerName(removeTarget)}</div>
             <div style={{ fontSize: 12, color: '#a89cc8', fontFamily: 'monospace' }}>{removeTarget.ownerCode}</div>
           </div>
+
           <div style={{ marginBottom: 20, padding: '10px 14px', background: '#fff8e6', border: '1px solid rgba(230,160,0,0.25)', borderRadius: 10, fontSize: 13, color: '#8a5a00' }}>
             ℹ️ ข้อมูลปีภาษีที่ผ่านมาและข้อมูลประจำตัวผู้เสียภาษีจะ<strong>ไม่ถูกลบ</strong>
           </div>
+
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
             <button className="btn-secondary" onClick={() => setRemoveTarget(null)}>ยกเลิก</button>
+
             <button onClick={() => handleRemove(removeTarget)} style={{
               background: 'linear-gradient(135deg,#c0392b,#e74c3c)', color: 'white', border: 'none',
               borderRadius: 12, padding: '10px 20px', fontSize: 14, fontWeight: 600, cursor: 'pointer',
               fontFamily: "'Sarabun',sans-serif"
-            }}>ยืนยันนำออก</button>
+            }}>
+              ยืนยันนำออก
+            </button>
           </div>
         </Modal>
       )}

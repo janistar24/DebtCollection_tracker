@@ -1,19 +1,18 @@
-interface TaxpayerYearRecordCreate {
+const API_URL =
+  import.meta.env.VITE_API_URL ||
+  'http://127.0.0.1:8000/api'
+
+export interface TaxpayerYearRecordCreate {
   taxpayer_id: number
   tax_year: number
   note: string | null
   added_by: number | null
 }
 
-
-interface TaxpayerYearRecordUpdate {
+export interface TaxpayerYearRecordUpdate {
   note: string | null
   is_included: boolean
 }
-
-const API_URL =
-  import.meta.env.VITE_API_URL ||
-  'http://127.0.0.1:8000/api'
 
 // CREATE
 export async function createTaxpayerYearRecord(
@@ -46,11 +45,6 @@ export async function createTaxpayerYearRecord(
 }
 
 // UPDATE
-interface TaxpayerYearRecordUpdate {
- note: string | null
- is_included: boolean
-}
-
 export async function updateTaxpayerYearRecord(
  yearRecordId: number,
  data: TaxpayerYearRecordUpdate
