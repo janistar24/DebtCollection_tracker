@@ -7,6 +7,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/dashboard': 'หน้าหลัก',
   '/taxpayers': 'ข้อมูลผู้เสียภาษีประจำปี',
   '/taxpayers/new': 'เพิ่มผู้เสียภาษีรายใหม่',
+  '/taxpayers/manage': 'จัดการผู้เสียภาษีทั้งหมด',
   '/payment-matching': 'ตรวจสอบการชำระ',
   '/search-payment': 'ตรวจสอบและบันทึกการชำระ',
   '/reports': 'รายงาน',
@@ -29,7 +30,7 @@ export default function Header({ pathname }: Props) {
         <h1 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#2d2545' }}>{title}</h1>
         {showYear && (
           <YearSelector value={selectedYear} onChange={setSelectedYear}
-            years={[CURRENT_YEAR - 2, CURRENT_YEAR - 1, CURRENT_YEAR]} />
+            years={Array.from({ length: 10 }, (_, index) => CURRENT_YEAR - index)} />
         )}
       </div>
       {currentUser && (

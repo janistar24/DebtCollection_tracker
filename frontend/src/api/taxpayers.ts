@@ -85,6 +85,34 @@ export interface TaxpayerCreate {
   is_active: boolean
 }
 
+export async function updateTaxpayerMaster(id: number, data: TaxpayerCreate) {
+  return taxpayerMutation(`${API_URL}/taxpayers/${id}`, 'PUT', data)
+}
+
+export async function setTaxpayerActive(id: number, active: boolean) {
+  return taxpayerMutation(
+    `${API_URL}/taxpayers/${id}/${active ? 'reactivate' : 'deactivate'}`,
+    'PUT'
+  )
+}
+
+export async function deleteTaxpayerMaster(id: number) {
+  return taxpayerMutation(`${API_URL}/taxpayers/${id}`, 'DELETE')
+}
+
+async function taxpayerMutation(url: string, method: string, data?: unknown) {
+  const response = await fetch(url, {
+    method,
+    headers: data ? { 'Content-Type': 'application/json' } : undefined,
+    body: data ? JSON.stringify(data) : undefined
+  })
+  const result = await response.json()
+  if (!response.ok || !result.success) {
+    throw new Error(typeof result.detail === 'string' ? result.detail : result.detail?.message ?? result.message ?? 'ดำเนินการไม่สำเร็จ')
+  }
+  return result
+}
+
 export async function createTaxpayer(
   data: TaxpayerCreate
 ) {
@@ -98,6 +126,37 @@ export async function createTaxpayer(
       body: JSON.stringify(data)
     }
   )
+
+  const result = await response.json()
+
+  if (!response.ok || !result.success) {
+    throw new Error(
+      typeof result.detail === 'string'
+        ? result.detail
+        : result.detail?.message ??
+          result.message ??
+          'เพิ่มผู้เสียภาษีไม่สำเร็จ'
+    )
+  }
+
+  return result
+}
+
+export interface CompleteTaxpayerCreate extends TaxpayerCreate {
+  tax_year: number
+  land_amount: number
+  sign_amount: number
+  added_by: number | null
+}
+
+export async function createCompleteTaxpayer(
+  data: CompleteTaxpayerCreate
+) {
+  const response = await fetch(`${API_URL}/taxpayers/complete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  })
 
   const result = await response.json()
 

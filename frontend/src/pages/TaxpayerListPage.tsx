@@ -14,6 +14,7 @@ import {
 } from '../api/tax_assessments'
 import {
   createTaxpayerYearRecord,
+  getTaxpayerYearRecord,
   removeTaxpayerFromYear,
   updateTaxpayerYearRecord
 } from '../api/taxpayer_year_records'
@@ -102,7 +103,9 @@ export default function TaxpayerListPage() {
       // hide removed (no assessment this year)
       if (!tp.assessments.find(a => a.year === selectedYear)) return false
       return true
-    })
+    }).sort((a, b) =>
+      getTaxpayerName(a).localeCompare(getTaxpayerName(b), 'th')
+    )
   }, [taxpayers, search, groupFilter, statusFilter, personTypeFilter, selectedYear, currentUser, isDirector])
 
   const landTotal = filtered.reduce((s, tp) => s + (getAssessment(tp, selectedYear)?.landAmount ?? 0), 0)
@@ -140,6 +143,17 @@ export default function TaxpayerListPage() {
 const handleSaveAll = async () => {
   try {
     setSaving(true)
+
+    // ==========================================
+    // SAVE รายชื่อที่นำออกจากปีภาษีก่อน
+    // ==========================================
+    // ต้องทำก่อน pendingAdds เพราะรายการเดียวกันอาจถูกลบแล้วเพิ่มกลับ
+    // ภายใน edit session เดียวกัน เมื่อ remove สำเร็จ POST ด้านล่าง
+    // จะเข้าเส้นทาง REACTIVATED ได้โดยไม่ชน duplicate record
+    for (const item of Object.values(pendingRemoves)) {
+      await removeTaxpayerFromYear(Number(item.yearRecordId))
+    }
+
     // ==========================================
     // SAVE รายชื่อที่เพิ่มเข้าตาราง
     // ==========================================
@@ -159,8 +173,8 @@ const handleSaveAll = async () => {
 
       const yearRecordId = Number(yearResult.data.year_record_id)
 
-      // ถ้าเป็นคนเดิมที่เคยถูกนำออกจากปีนี้
-      // Assessment เดิมยังอยู่ใน DB ไม่สร้างใหม่
+      // REACTIVATED และ ALREADY_INCLUDED ใช้ year record/assessment เดิม
+      // ต้องไม่สร้าง tax assessment ซ้ำ
       if (
         yearResult.action === 'REACTIVATED' ||
         yearResult.action === 'ALREADY_INCLUDED'
@@ -344,17 +358,6 @@ const handleSaveAll = async () => {
       })
     }
 
-    // ==========================================
-    // SAVE รายชื่อที่นำออกจากปีภาษี
-    // ==========================================
-    // บันทึกการนำออกก่อนการเพิ่มกลับ
-    // เพื่อให้ backend เปลี่ยน is_included เป็น false ก่อน
-    for (const item of Object.values(pendingRemoves)) {
-      await removeTaxpayerFromYear(
-        Number(item.yearRecordId)
-      )
-    }
-
     setPendingEdits({})
     setPendingNotes({})
     setPendingAdds({})
@@ -494,53 +497,43 @@ const handleRemove = (tp: Taxpayer) => {
     setInlineDropOpen(false)
   }
 
-const handleInlineAdd = () => {
+const handleInlineAdd = async () => {
   if (!inlineSelected) return
 
   const taxpayerId = inlineSelected.id
 
-  // ถ้าเพิ่งลบออกจากตารางใน edit session นี้
-  // ให้นำ assessment เดิมจาก cache กลับมาใช้
-  const removedAssessment = removedAssessmentCache[taxpayerId]
+  setInlineAdding(true)
 
-  // ถ้าไม่เคยมีข้อมูลในปีนี้ ให้ดึงข้อมูลปีล่าสุดก่อนหน้ามาเป็นค่าเริ่มต้น
+  try {
+  // ใช้ cache ก่อน หากเปลี่ยนหน้าไปแล้วให้โหลดข้อมูลเดิมจากฐานข้อมูล
+  const removedAssessment =
+    removedAssessmentCache[taxpayerId] ??
+    await getTaxpayerYearRecord(Number(taxpayerId), selectedYear)
+
+  // ถ้าไม่เคยมีปีนี้ ค่อยใช้ข้อมูลปีก่อน/ปีล่าสุด
   const previousAssessment = [...inlineSelected.assessments]
     .filter(a => a.year < selectedYear)
     .sort((a, b) => b.year - a.year)[0]
 
-  const sourceAssessment =
-    removedAssessment ?? previousAssessment
+  const sourceAssessment = removedAssessment ?? previousAssessment
 
-  const landAmount =
-    sourceAssessment?.landAmount ?? 0
-
-  const signAmount =
-    sourceAssessment?.signAmount ?? 0
+  const landAmount = sourceAssessment?.landAmount ?? 0
+  const signAmount = sourceAssessment?.signAmount ?? 0
 
   const updated: Taxpayer = {
     ...inlineSelected,
     assessments: [
-      ...inlineSelected.assessments.filter(
-        a => a.year !== selectedYear
-      ),
+      ...inlineSelected.assessments.filter(a => a.year !== selectedYear),
       {
-        yearRecordId:
-          removedAssessment?.yearRecordId ?? '',
-
-        landAssessmentId:
-          removedAssessment?.landAssessmentId ?? '',
-
-        signAssessmentId:
-          removedAssessment?.signAssessmentId ?? '',
-
+        yearRecordId: removedAssessment?.yearRecordId ?? '',
+        landAssessmentId: removedAssessment?.landAssessmentId ?? '',
+        signAssessmentId: removedAssessment?.signAssessmentId ?? '',
         year: selectedYear,
         landAmount,
         signAmount,
-
         prevLandAmount: removedAssessment
           ? removedAssessment.prevLandAmount ?? 0
           : previousAssessment?.landAmount ?? 0,
-
         prevSignAmount: removedAssessment
           ? removedAssessment.prevSignAmount ?? 0
           : previousAssessment?.signAmount ?? 0
@@ -548,20 +541,20 @@ const handleInlineAdd = () => {
     ]
   }
 
-  // นำผู้เสียภาษีกลับมาแสดงในตาราง
   updateTaxpayer(updated)
 
-  // เก็บ pendingAdds แม้เป็นคนเดียวกับ pendingRemoves
-  // ลบ -> เพิ่ม จึงนับเป็น 2 การเปลี่ยนแปลง
-  setPendingAdds(prev => ({
-    ...prev,
-    [taxpayerId]: true
-  }))
+  // เก็บ pendingAdds แม้เป็นคนเดียวกับ pendingRemoves เพื่อให้กรณี
+  // ลบ -> เพิ่ม -> บันทึก ถูกนับเป็น 2 การเปลี่ยนแปลง
+  setPendingAdds(prev => ({ ...prev, [taxpayerId]: true }))
 
-  // ล้างช่องค้นหาหลังเพิ่มสำเร็จ
   setInlineSearch('')
   setInlineSelected(null)
   setInlineDropOpen(false)
+  } catch (error) {
+    alert(error instanceof Error ? error.message : 'เพิ่มผู้เสียภาษีเข้าตารางไม่สำเร็จ')
+  } finally {
+    setInlineAdding(false)
+  }
 }
 
   const diff = (curr: number, prev: number) => {
@@ -642,11 +635,6 @@ const handleInlineAdd = () => {
             </>
           )}
 
-          {!editMode && !isDirector && (
-            <button className="btn-primary" onClick={() => navigate('/taxpayers/new')} style={{ fontSize: 13 }}>
-              ➕ เพิ่มผู้เสียภาษีรายใหม่
-            </button>
-          )}
         </div>
       </div>
 
@@ -673,6 +661,9 @@ const handleInlineAdd = () => {
       </div>
 
       <div className="glass-card" style={{ padding: 0, overflow: 'visible' }}>
+        <div style={{ padding: '14px 18px', fontSize: 14, fontWeight: 700, color: '#5f4796', background: 'linear-gradient(90deg,rgba(240,236,251,.85),rgba(255,255,255,.7))', borderBottom: '1px solid rgba(200,190,240,.25)' }}>
+          รายละเอียดผู้ชำระภาษีที่ดินและสิ่งปลูกสร้าง-ภาษีป้าย_{selectedYear}_{groupFilter === 'all' ? 'ทุกกลุ่ม' : groupFilter}
+        </div>
         {filtered.length === 0 && !editMode ? (
           <EmptyState icon="🔍" title="ไม่พบข้อมูล" sub="ลองเปลี่ยนเงื่อนไขการค้นหา" />
         ) : (
@@ -687,7 +678,6 @@ const handleInlineAdd = () => {
                   <th style={{ ...TH, textAlign: 'center' }} colSpan={3}>ภาษีป้าย</th>
                   <th style={TH}>หมายเหตุ</th>
                   <th style={TH}>สถานะ</th>
-                  <th style={TH}></th>
                   {editMode && <th style={{ ...TH, width: 40 }}></th>}
                 </tr>
 
@@ -695,7 +685,7 @@ const handleInlineAdd = () => {
                   <th style={TH} colSpan={3}></th>
                   {['ปีนี้', 'ปีก่อน', 'เพิ่ม/ลด'].map(h => <th key={`l${h}`} style={{ ...TH, fontWeight: 500, color: '#8873b5', fontSize: 11 }}>{h}</th>)}
                   {['ปีนี้', 'ปีก่อน', 'เพิ่ม/ลด'].map(h => <th key={`s${h}`} style={{ ...TH, fontWeight: 500, color: '#8873b5', fontSize: 11 }}>{h}</th>)}
-                  <th style={TH} colSpan={editMode ? 4 : 3}></th>
+                  <th style={TH} colSpan={editMode ? 3 : 2}></th>
                 </tr>
               </thead>
 
@@ -753,12 +743,6 @@ const handleInlineAdd = () => {
 
                       <td style={TD}><StatusBadge status={payStat} size="sm" /></td>
 
-                      <td style={TD}>
-                        <button className="btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }} onClick={() => navigate(`/taxpayers/${tp.id}`)}>
-                          ดู →
-                        </button>
-                      </td>
-
                       {editMode && (
                         <td style={{ ...TD, textAlign: 'center' }}>
                           <button onClick={() => setRemoveTarget(tp)} title="นำออกจากปีนี้" style={{
@@ -775,7 +759,7 @@ const handleInlineAdd = () => {
                 {/* Inline add row — Searchable Dropdown */}
                 {editMode && isCurrentYear && (
                   <tr style={{ background: 'rgba(240,236,251,0.35)', borderTop: '2px dashed rgba(124,92,191,0.25)' }}>
-                    <td style={TD} colSpan={editMode ? 13 : 12}>
+                    <td style={TD} colSpan={editMode ? 12 : 11}>
                       <div style={{ fontSize: 11, color: '#7c5cbf', marginBottom: 3, fontWeight: 600 }}>+ เพิ่มรายการ</div>
                       <div style={{ fontSize: 10, color: '#a89cc8', marginBottom: 7 }}>
                         เลือกผู้เสียภาษีแล้วเพิ่มเข้าตาราง ระบบจะใช้ยอดภาษีล่าสุดเป็นค่าเริ่มต้น
@@ -862,7 +846,7 @@ const handleInlineAdd = () => {
                   <td style={{ ...TD, textAlign: 'right', color: '#2d2545' }}>฿{formatCurrency(signTotal)}</td>
                   <td colSpan={2} style={TD}></td>
                   <td style={{ ...TD, fontWeight: 700, color: '#7c5cbf' }}>฿{formatCurrency(landTotal + signTotal)}</td>
-                  <td colSpan={editMode ? 3 : 2} style={TD}></td>
+                  <td colSpan={editMode ? 2 : 1} style={TD}></td>
                 </tr>
               </tfoot>
             </table>

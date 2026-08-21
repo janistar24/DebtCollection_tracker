@@ -19,8 +19,8 @@ interface TaxAssessment {
   yearRecordId: string
   taxpayerId: string
 
-  landAssessmentId: string | null
-  signAssessmentId: string | null
+  landAssessmentId: string
+  signAssessmentId: string
 
   year: number
   landAmount: number

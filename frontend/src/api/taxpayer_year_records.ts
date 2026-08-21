@@ -14,6 +14,60 @@ export interface TaxpayerYearRecordUpdate {
   is_included: boolean
 }
 
+export async function getTaxpayerYearRecord(
+  taxpayerId: number,
+  taxYear: number
+) {
+  const response = await fetch(
+    `${API_URL}/taxpayer-year-records/by-taxpayer/${taxpayerId}/${taxYear}`
+  )
+
+  const result = await response.json()
+
+  if (!response.ok || !result.success) {
+    throw new Error(
+      typeof result.detail === 'string'
+        ? result.detail
+        : result.detail?.message ??
+          'โหลดข้อมูลปีภาษีเดิมไม่สำเร็จ'
+    )
+  }
+
+  if (!result.data) {
+    return null
+  }
+
+  return {
+    yearRecordId:
+      String(result.data.year_record_id),
+
+    landAssessmentId:
+      Number(result.data.land_assessment_id) > 0
+        ? String(result.data.land_assessment_id)
+        : '',
+
+    signAssessmentId:
+      Number(result.data.sign_assessment_id) > 0
+        ? String(result.data.sign_assessment_id)
+        : '',
+
+    year:
+      taxYear,
+
+    landAmount:
+      Number(result.data.land_amount),
+
+    signAmount:
+      Number(result.data.sign_amount),
+
+    prevLandAmount:
+      Number(result.data.prev_land_amount),
+
+    prevSignAmount:
+      Number(result.data.prev_sign_amount)
+  }
+}
+
 // CREATE
 export async function createTaxpayerYearRecord(
   data: TaxpayerYearRecordCreate

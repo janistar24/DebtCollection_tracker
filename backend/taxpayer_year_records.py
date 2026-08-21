@@ -114,7 +114,7 @@ class Taxpayer_year_records:
         # ไม่เคยมีในปีนี้ → INSERT ใหม่
         # ==========================================
 
-        new_data, new_columns = self.db.fetch(
+        new_row, new_columns = self.db.execute_returning(
             """
             INSERT INTO public.taxpayer_year_records (
                 taxpayer_id,
@@ -123,7 +123,6 @@ class Taxpayer_year_records:
                 is_included,
                 added_by
             )
-
             VALUES (
                 %s,
                 %s,
@@ -131,7 +130,6 @@ class Taxpayer_year_records:
                 TRUE,
                 %s
             )
-
             RETURNING
                 year_record_id,
                 taxpayer_id,
@@ -151,15 +149,14 @@ class Taxpayer_year_records:
         )
 
         new_record = dict(
-            zip(new_columns, new_data[0])
+            zip(new_columns, new_row)
         )
 
         return {
             "Is Error": False,
             "Error Message": "",
             "Action": "CREATED",
-            "year_record_id":
-                new_record["year_record_id"]
+            "year_record_id": new_record["year_record_id"]
         }
 
     def dump(self):

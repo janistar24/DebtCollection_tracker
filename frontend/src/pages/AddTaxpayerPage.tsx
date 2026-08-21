@@ -14,7 +14,7 @@ import {
 } from '../api/tax_assessments'
 
 export default function AddTaxpayerPage() {
-  const { addTaxpayer, currentUser, taxpayers } = useApp()
+  const { currentUser, taxpayers, refreshData } = useApp()
   const navigate = useNavigate()
 
   const [tpType, setTpType] = useState<'individual' | 'company'>('individual')
@@ -186,7 +186,7 @@ const handleSubmit = async (
 
 
     // ============================
-    // 3. CREATE LAND ASSESSMENT
+    // CREATE LAND ASSESSMENT
     // ============================
 
     if (land > 0) {
@@ -221,7 +221,7 @@ const handleSubmit = async (
 
 
     // ============================
-    // 4. CREATE SIGN ASSESSMENT
+    // CREATE SIGN ASSESSMENT
     // ============================
 
     if (sign > 0) {
@@ -255,12 +255,13 @@ const handleSubmit = async (
     }
 
 
+    // โหลดข้อมูลล่าสุดจากฐานข้อมูล
+    await refreshData()
+
     setSaved(true)
 
-    setTimeout(
-      () => navigate('/taxpayers'),
-      1500
-    )
+    // เปลี่ยนหน้าด้วย React โดยไม่ reload
+    navigate('/taxpayers')
 
   } catch (error) {
 

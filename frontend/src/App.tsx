@@ -11,6 +11,7 @@ import TaxpayerDetailPage from './pages/TaxpayerDetailPage'
 import ReportPage from './pages/ReportPage'
 import AdminUsersPage from './pages/AdminUsersPage'
 import SearchPaymentPage from './pages/SearchPaymentPage'
+import ManageTaxpayersPage from './pages/ManageTaxPayersPage'
 
 function ProtectedLayout() {
   const { currentUser } = useApp()
@@ -30,6 +31,8 @@ function ProtectedLayout() {
             <Route path="/taxpayers/new" element={
               currentUser.role === 'director' ? <Navigate to="/taxpayers" replace /> : <AddTaxpayerPage />
             } />
+            <Route path="/taxpayers/manage" element={<ManageTaxpayersPage />} />
+            <Route path="/taxpayers/manage/:id" element={<TaxpayerDetailPage />} />
             <Route path="/taxpayers/:id" element={<TaxpayerDetailPage />} />
             <Route path="/taxpayers" element={<TaxpayerListPage />} />
             <Route path="/payment-matching" element={<SearchPaymentPage />} />

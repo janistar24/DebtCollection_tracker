@@ -173,6 +173,24 @@ def get_payments():
             }
         )
 
+@app.get("/api/payment-allocations")
+def get_payment_allocations():
+    try:
+        allocations = payment_allocations_service.dump()
+        return {
+            "success": True,
+            "count": len(allocations),
+            "data": allocations
+        }
+    except Exception as error:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": "ไม่สามารถดึงข้อมูลการจัดสรรยอดชำระได้",
+                "error": str(error)
+            }
+        )
+
 @app.get("/api/follow-up-logs")
 def get_follow_up_logs():
     try:
@@ -197,6 +215,91 @@ def get_follow_up_logs():
 class LoginRequest(BaseModel):
     username: str
     password: str
+
+class PaymentAllocationInput(BaseModel):
+    assessment_id: int
+    allocated_amount: float
+
+class CompletePaymentCreate(BaseModel):
+    payment_amount: float
+    payment_date: str
+    payment_method: str
+    reference_no: str | None = None
+    receipt_no: str | None = None
+    recorded_by: int | None = None
+    allocations: list[PaymentAllocationInput]
+
+@app.post("/api/payments/complete")
+def create_complete_payment(request: CompletePaymentCreate):
+    """บันทึกยอดชำระและการจัดสรรภาษีทั้งหมดใน transaction เดียว"""
+    if request.payment_amount <= 0:
+        raise HTTPException(status_code=400, detail="ยอดชำระต้องมากกว่า 0")
+    if not request.allocations:
+        raise HTTPException(status_code=400, detail="กรุณาเลือกประเภทภาษีที่ต้องการชำระ")
+
+    allocated_total = sum(item.allocated_amount for item in request.allocations)
+    if any(item.allocated_amount <= 0 for item in request.allocations):
+        raise HTTPException(status_code=400, detail="ยอดจัดสรรแต่ละรายการต้องมากกว่า 0")
+    if abs(allocated_total - request.payment_amount) > 0.009:
+        raise HTTPException(status_code=400, detail="ผลรวมยอดจัดสรรต้องเท่ากับยอดชำระ")
+
+    try:
+        with db.transaction() as cursor:
+            for item in request.allocations:
+                cursor.execute(
+                    "SELECT assessment_id FROM public.tax_assessments WHERE assessment_id = %s",
+                    (item.assessment_id,)
+                )
+                if cursor.fetchone() is None:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"ไม่พบข้อมูลการประเมินภาษีรหัส {item.assessment_id}"
+                    )
+
+            cursor.execute(
+                """
+                INSERT INTO public.payments (
+                    payment_amount, payment_date, payment_method,
+                    reference_no, receipt_no, status, recorded_by
+                )
+                VALUES (%s, %s, %s, %s, %s, 'MATCHED', %s)
+                RETURNING payment_id
+                """,
+                (
+                    request.payment_amount, request.payment_date,
+                    request.payment_method.upper(), request.reference_no,
+                    request.receipt_no, request.recorded_by
+                )
+            )
+            payment_id = cursor.fetchone()[0]
+
+            for item in request.allocations:
+                cursor.execute(
+                    """
+                    INSERT INTO public.payment_allocations (
+                        payment_id, assessment_id, allocated_amount, matched_by
+                    )
+                    VALUES (%s, %s, %s, %s)
+                    """,
+                    (
+                        payment_id, item.assessment_id,
+                        item.allocated_amount, request.recorded_by
+                    )
+                )
+
+        return {
+            "success": True,
+            "message": "บันทึกการชำระและจัดสรรยอดเรียบร้อยแล้ว",
+            "data": {"payment_id": payment_id}
+        }
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(
+            status_code=500,
+            detail={"message": "บันทึกการชำระไม่สำเร็จ", "error": str(error)}
+        )
+
 @app.post("/api/login")
 def login(request: LoginRequest):
 
@@ -250,6 +353,130 @@ class TaxpayerCreate(BaseModel):
     address: str | None = None
     group_code: str
     is_active: bool = True
+
+class CompleteTaxpayerCreate(TaxpayerCreate):
+    tax_year: int
+    land_amount: float = 0
+    sign_amount: float = 0
+    added_by: int | None = None
+
+@app.post("/api/taxpayers/complete")
+def create_complete_taxpayer(request: CompleteTaxpayerCreate):
+    """สร้าง master, year record และ assessments ใน transaction เดียว"""
+    try:
+        taxpayer_type = request.taxpayer_type
+        owner_code = request.owner_code
+        first_name = request.first_name
+        last_name = request.last_name
+        company_name = request.company_name
+        group_code = request.group_code
+
+        if taxpayer_type == "INDIVIDUAL":
+            if not first_name or not last_name or not owner_code:
+                raise HTTPException(
+                    status_code=400,
+                    detail="บุคคลธรรมดาต้องมีชื่อ นามสกุล และ Owner Code"
+                )
+            company_name = None
+        elif taxpayer_type == "COMPANY":
+            if not company_name:
+                raise HTTPException(
+                    status_code=400,
+                    detail="นิติบุคคลหรือบริษัทต้องมีชื่อบริษัท"
+                )
+            owner_code = None
+            first_name = None
+            last_name = None
+            group_code = "ว-ฮ และบริษัท"
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="taxpayer_type ต้องเป็น INDIVIDUAL หรือ COMPANY"
+            )
+
+        with db.transaction() as cursor:
+            if owner_code is not None:
+                cursor.execute(
+                    "SELECT taxpayer_id FROM public.taxpayers WHERE owner_code = %s",
+                    (owner_code,)
+                )
+                if cursor.fetchone() is not None:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Owner Code '{owner_code}' ถูกใช้งานแล้ว"
+                    )
+
+            cursor.execute(
+                """
+                INSERT INTO public.taxpayers (
+                    taxpayer_type, owner_code, first_name, last_name,
+                    company_name, phone, address, group_code, is_active
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING taxpayer_id
+                """,
+                (
+                    taxpayer_type, owner_code, first_name, last_name,
+                    company_name, request.phone, request.address,
+                    group_code, request.is_active
+                )
+            )
+            taxpayer_id = cursor.fetchone()[0]
+
+            cursor.execute(
+                """
+                INSERT INTO public.taxpayer_year_records (
+                    taxpayer_id, tax_year, note, is_included, added_by
+                )
+                VALUES (%s, %s, NULL, TRUE, %s)
+                RETURNING year_record_id
+                """,
+                (taxpayer_id, request.tax_year, request.added_by)
+            )
+            year_record_id = cursor.fetchone()[0]
+
+            assessment_ids = {}
+            for tax_type, amount in (
+                ("LAND_BUILDING", request.land_amount),
+                ("SIGN", request.sign_amount)
+            ):
+                if amount <= 0:
+                    continue
+
+                cursor.execute(
+                    """
+                    INSERT INTO public.tax_assessments (
+                        year_record_id, tax_type, assessed_amount,
+                        previous_amount, change_reason, assessment_date,
+                        annual_due_date, created_by
+                    )
+                    VALUES (%s, %s, %s, 0, NULL, NULL, NULL, %s)
+                    RETURNING assessment_id
+                    """,
+                    (year_record_id, tax_type, amount, request.added_by)
+                )
+                assessment_ids[tax_type] = cursor.fetchone()[0]
+
+        return {
+            "success": True,
+            "message": "เพิ่มผู้เสียภาษีและข้อมูลประจำปีเรียบร้อยแล้ว",
+            "data": {
+                "taxpayer_id": taxpayer_id,
+                "year_record_id": year_record_id,
+                "assessment_ids": assessment_ids
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": "ไม่สามารถเพิ่มผู้เสียภาษีได้",
+                "error": str(error)
+            }
+        )
+
 @app.post("/api/taxpayers")
 def create_taxpayer(request: TaxpayerCreate):
     result = taxpayers_service.create(
@@ -336,12 +563,67 @@ def deactivate_taxpayer(taxpayer_id: int):
         "message": "ปิดการใช้งานผู้เสียภาษีเรียบร้อยแล้ว"
     }
 
+@app.put("/api/taxpayers/{taxpayer_id}/reactivate")
+def reactivate_taxpayer(taxpayer_id: int):
+    result = taxpayers_service.reactivate(taxpayer_id)
+    if result["Is Error"]:
+        raise HTTPException(status_code=404, detail=result["Error Message"])
+    return {"success": True, "message": "เปิดใช้งานผู้เสียภาษีเรียบร้อยแล้ว"}
+
+@app.delete("/api/taxpayers/{taxpayer_id}")
+def delete_taxpayer(taxpayer_id: int):
+    result = taxpayers_service.delete(taxpayer_id)
+    if result["Is Error"]:
+        raise HTTPException(status_code=409, detail=result["Error Message"])
+    return {"success": True, "message": "ลบผู้เสียภาษีถาวรเรียบร้อยแล้ว"}
+
 #เพิ่ม API สำหรับเพิ่มผู้เสียภาษีเข้าปีภาษี
 class TaxpayerYearRecordCreate(BaseModel):
     taxpayer_id: int
     tax_year: int
     note: str | None = None
     added_by: int | None = None
+
+@app.get("/api/taxpayer-year-records/by-taxpayer/{taxpayer_id}/{tax_year}")
+def get_taxpayer_year_record_by_taxpayer(taxpayer_id: int, tax_year: int):
+    """อ่านข้อมูลเดิมได้แม้ record ถูกนำออกจากปีภาษีแล้ว"""
+    try:
+        data, columns = db.fetch(
+            """
+            SELECT
+                tyr.year_record_id,
+                tyr.is_included,
+                COALESCE(MAX(CASE WHEN ta.tax_type = 'LAND_BUILDING'
+                    THEN ta.assessment_id END), 0) AS land_assessment_id,
+                COALESCE(MAX(CASE WHEN ta.tax_type = 'SIGN'
+                    THEN ta.assessment_id END), 0) AS sign_assessment_id,
+                COALESCE(MAX(CASE WHEN ta.tax_type = 'LAND_BUILDING'
+                    THEN ta.assessed_amount END), 0) AS land_amount,
+                COALESCE(MAX(CASE WHEN ta.tax_type = 'SIGN'
+                    THEN ta.assessed_amount END), 0) AS sign_amount,
+                COALESCE(MAX(CASE WHEN ta.tax_type = 'LAND_BUILDING'
+                    THEN ta.previous_amount END), 0) AS prev_land_amount,
+                COALESCE(MAX(CASE WHEN ta.tax_type = 'SIGN'
+                    THEN ta.previous_amount END), 0) AS prev_sign_amount
+            FROM public.taxpayer_year_records tyr
+            LEFT JOIN public.tax_assessments ta
+                ON ta.year_record_id = tyr.year_record_id
+            WHERE tyr.taxpayer_id = %s AND tyr.tax_year = %s
+            GROUP BY tyr.year_record_id, tyr.is_included
+            """,
+            (taxpayer_id, tax_year)
+        )
+
+        return {
+            "success": True,
+            "data": dict(zip(columns, data[0])) if data else None
+        }
+    except Exception as error:
+        raise HTTPException(
+            status_code=500,
+            detail={"message": "ไม่สามารถโหลดข้อมูลปีภาษีเดิมได้", "error": str(error)}
+        )
+
 @app.post("/api/taxpayer-year-records")
 def create_taxpayer_year_record(
     request: TaxpayerYearRecordCreate

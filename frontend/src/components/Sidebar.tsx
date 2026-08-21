@@ -5,6 +5,7 @@ const ROLE_MENUS: Record<string, { path: string; icon: string; label: string }[]
   officer: [
     { path: '/dashboard', icon: '🏠', label: 'หน้าหลัก / งานวันนี้' },
     { path: '/taxpayers', icon: '📋', label: 'ข้อมูลผู้เสียภาษีประจำปี' },
+    { path: '/taxpayers/manage', icon: '👥', label: 'จัดการผู้เสียภาษีทั้งหมด' },
     { path: '/taxpayers/new', icon: '➕', label: 'เพิ่มผู้เสียภาษี' },
     { path: '/search-payment', icon: '💳', label: 'ตรวจสอบและบันทึกการชำระ' },
     { path: '/reports', icon: '📊', label: 'รายงาน' },
@@ -12,12 +13,14 @@ const ROLE_MENUS: Record<string, { path: string; icon: string; label: string }[]
   director: [
     { path: '/dashboard', icon: '🏠', label: 'ภาพรวมระบบ' },
     { path: '/taxpayers', icon: '📋', label: 'ข้อมูลผู้เสียภาษี' },
+    { path: '/taxpayers/manage', icon: '👥', label: 'จัดการผู้เสียภาษีทั้งหมด' },
     { path: '/search-payment', icon: '💳', label: 'ตรวจสอบและบันทึกการชำระ' },
     { path: '/reports', icon: '📊', label: 'รายงาน' },
   ],
   admin: [
     { path: '/dashboard', icon: '🏠', label: 'หน้าหลัก' },
     { path: '/taxpayers', icon: '📋', label: 'ข้อมูลผู้เสียภาษี' },
+    { path: '/taxpayers/manage', icon: '👥', label: 'จัดการผู้เสียภาษีทั้งหมด' },
     { path: '/search-payment', icon: '💳', label: 'ตรวจสอบและบันทึกการชำระ' },
     { path: '/reports', icon: '📊', label: 'รายงาน' },
     { path: '/admin/users', icon: '👥', label: 'จัดการผู้ใช้งาน' },
@@ -66,7 +69,8 @@ export default function Sidebar({ collapsed, onToggle }: Props) {
       {/* Menu */}
       <nav style={{ flex: 1, padding: '12px 8px', overflowY: 'auto', overflowX: 'hidden' }}>
         {menus.map(m => {
-          const active = location.pathname === m.path || (m.path !== '/dashboard' && m.path !== '/taxpayers/new' && location.pathname.startsWith(m.path) && !location.pathname.startsWith('/taxpayers/new'))
+          const active = location.pathname === m.path ||
+            (m.path !== '/dashboard' && m.path !== '/taxpayers' && m.path !== '/taxpayers/new' && location.pathname.startsWith(`${m.path}/`))
           return (
             <Link key={m.path} to={m.path} className={`sidebar-item ${active ? 'active' : ''}`}
               style={{ justifyContent: collapsed ? 'center' : 'flex-start', padding: collapsed ? '10px 0' : '10px 14px', marginBottom: 2 }}

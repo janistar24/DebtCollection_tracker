@@ -356,6 +356,53 @@ class Taxpayers:
             "Error Message": ""
         }
 
+    def reactivate(self, taxpayer_id):
+        data, _ = self.db.fetch(
+            "SELECT taxpayer_id FROM public.taxpayers WHERE taxpayer_id = %s",
+            (taxpayer_id,)
+        )
+        if not data:
+            return {"Is Error": True, "Error Message": f"ไม่พบผู้เสียภาษีรหัส {taxpayer_id}"}
+
+        self.db.execute(
+            "UPDATE public.taxpayers SET is_active = TRUE, updated_at = CURRENT_TIMESTAMP WHERE taxpayer_id = %s",
+            (taxpayer_id,)
+        )
+        return {"Is Error": False, "Error Message": ""}
+
+    def delete(self, taxpayer_id):
+        # ห้ามลบเมื่อมีการชำระเงินที่จัดสรรแล้ว เพื่อรักษาประวัติทางการเงิน
+        data, _ = self.db.fetch(
+            """
+            SELECT pa.allocation_id
+            FROM public.payment_allocations pa
+            JOIN public.tax_assessments ta ON ta.assessment_id = pa.assessment_id
+            JOIN public.taxpayer_year_records tyr ON tyr.year_record_id = ta.year_record_id
+            WHERE tyr.taxpayer_id = %s
+            LIMIT 1
+            """,
+            (taxpayer_id,)
+        )
+        if data:
+            return {
+                "Is Error": True,
+                "Error Message": "ไม่สามารถลบได้ เนื่องจากผู้เสียภาษีรายนี้มีประวัติการชำระเงินแล้ว"
+            }
+
+        # ไม่มีการชำระเงิน: ลบข้อมูลลูกและ master ใน transaction เดียว
+        with self.db.transaction() as cursor:
+            cursor.execute(
+                "DELETE FROM public.follow_up_logs WHERE year_record_id IN (SELECT year_record_id FROM public.taxpayer_year_records WHERE taxpayer_id = %s)",
+                (taxpayer_id,)
+            )
+            cursor.execute(
+                "DELETE FROM public.tax_assessments WHERE year_record_id IN (SELECT year_record_id FROM public.taxpayer_year_records WHERE taxpayer_id = %s)",
+                (taxpayer_id,)
+            )
+            cursor.execute("DELETE FROM public.taxpayer_year_records WHERE taxpayer_id = %s", (taxpayer_id,))
+            cursor.execute("DELETE FROM public.taxpayers WHERE taxpayer_id = %s", (taxpayer_id,))
+        return {"Is Error": False, "Error Message": ""}
+
     # FIND TAXPAYER BY OWNER CODE
     def find_by_owner_code(self, owner_code):
         data, columns = self.db.fetch(

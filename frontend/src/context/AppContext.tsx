@@ -1,10 +1,11 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
 import { login as apiLogin } from '../api/auth'
 import type { User, Taxpayer, Payment, FollowUp } from '../types'
 import { CURRENT_YEAR } from '../data/mockData'
 import { getUsers } from '../api/users'
 import { getTaxpayers } from '../api/taxpayers'
 import { getTaxAssessments } from '../api/tax_assessments'
+import { getAllocatedPayments } from '../api/payments'
 
 
 interface AppState {
@@ -21,6 +22,7 @@ interface AppState {
   addFollowUp: (fu: FollowUp) => void
   addUser: (u: User) => void
   updateUser: (u: User) => void
+  refreshData: () => Promise<void>
 }
 
 const AppContext = createContext<AppState | null>(null)
@@ -31,12 +33,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [taxpayers, setTaxpayers] = useState<Taxpayer[]>([])
   const [selectedYear, setSelectedYear] = useState(CURRENT_YEAR)
   
-  useEffect(() => {
-  async function loadData() {
+  const refreshData = useCallback(async () => {
     try {
-      const usersData = await getUsers() // 1. โหลด users
-      const taxpayersData = await getTaxpayers() // 2. โหลดข้อมูลผู้เสียภาษี
-      const taxassessmentsData = await getTaxAssessments() // 3. โหลดข้อมูล assessment
+      const [usersData, taxpayersData, taxassessmentsData, paymentsData] = await Promise.all([
+        getUsers(),
+        getTaxpayers(),
+        getTaxAssessments(),
+        getAllocatedPayments(),
+      ])
 
       console.log('taxpayersData =', taxpayersData)
       console.log('taxAssessmentsData =', taxassessmentsData)
@@ -70,6 +74,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return {
           ...taxpayer,
           assessments: taxpayerAssessments,
+          payments: paymentsData.filter(payment => payment.taxpayerId === taxpayer.id),
           notes: selectedYearAssessment?.note ?? ''
         }
       })
@@ -85,11 +90,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         error
       )
     }
-  }
+  }, [selectedYear])
 
-  loadData()
-
-}, [selectedYear])
+  useEffect(() => {
+    void refreshData()
+  }, [refreshData])
   
   const login = async (
     username: string,
@@ -137,7 +142,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       currentUser, users, taxpayers, selectedYear,
       login, logout, setSelectedYear,
       addTaxpayer, updateTaxpayer, addPayment, addFollowUp,
-      addUser, updateUser
+      addUser, updateUser, refreshData
     }}>
       {children}
     </AppContext.Provider>

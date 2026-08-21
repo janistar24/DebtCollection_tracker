@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useApp } from '../context/AppContext'
 import StatusBadge from '../components/StatusBadge'
 import Modal from '../components/Modal'
@@ -9,6 +9,9 @@ import {
   getUserById, getLandPaid, getSignPaid
 } from '../data/mockData'
 import type { FollowUp, Payment, Taxpayer } from '../types'
+import { deleteTaxpayerMaster, updateTaxpayerMaster } from '../api/taxpayers'
+import { generateOwnerCode, isDuplicateCode } from '../utils/ownerCode'
+import { createCompletePayment } from '../api/payments'
 
 // Extract short keyword tags from a freeform note string
 function extractTags(tp: Taxpayer): { label: string; year: number; note: string }[] {
@@ -138,10 +141,16 @@ const CONTACT_ICONS: Record<string, string> = {
   assessment: '📋', notice: '📨', payment: '💰', promise: '📅'
 }
 
+const localDateTimeNow = () => {
+  const now = new Date()
+  return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+}
+
 export default function TaxpayerDetailPage() {
   const { id } = useParams<{ id: string }>()
-  const { taxpayers, addFollowUp, addPayment, currentUser } = useApp()
+  const { taxpayers, addFollowUp, addPayment, currentUser, refreshData } = useApp()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const tp = taxpayers.find(t => t.id === id)
   const [showFollowModal, setShowFollowModal] = useState(false)
   const [showPayModal, setShowPayModal] = useState(false)
@@ -158,19 +167,35 @@ export default function TaxpayerDetailPage() {
 
   // Payment form
   const [payAmt, setPayAmt] = useState('')
-  const [payDate, setPayDate] = useState(new Date().toISOString().slice(0,10))
+  const [payDate, setPayDate] = useState(localDateTimeNow())
+  const [payTaxScope, setPayTaxScope] = useState<'land' | 'sign' | 'both'>('land')
+  const [payLandAlloc, setPayLandAlloc] = useState('')
+  const [paySignAlloc, setPaySignAlloc] = useState('')
   const [payMethod, setPayMethod] = useState<'transfer' | 'cash'>('transfer')
   const [payRef, setPayRef] = useState('')
   const [payReceipt, setPayReceipt] = useState('')
   const [paySaving, setPaySaving] = useState(false)
   const [paySaved, setPaySaved] = useState(false)
   const [fuSaved, setFuSaved] = useState(false)
+  const [editing, setEditing] = useState<Taxpayer | null>(null)
+  const [masterSaving, setMasterSaving] = useState(false)
+
+  useEffect(() => {
+    if (tp && searchParams.get('edit') === '1') {
+      setEditing({ ...tp })
+      setSearchParams({}, { replace: true })
+    }
+    if (tp && searchParams.get('delete') === '1') {
+      setSearchParams({}, { replace: true })
+      void handleDeleteMaster(tp)
+    }
+  }, [tp?.id, searchParams.get('edit'), searchParams.get('delete')])
 
   if (!tp) return (
     <div style={{ padding: 40, textAlign: 'center' }}>
       <div style={{ fontSize: 40 }}>🔍</div>
       <div style={{ fontSize: 16, color: '#6b5b95', marginTop: 12 }}>ไม่พบข้อมูลผู้เสียภาษี</div>
-      <button className="btn-secondary" onClick={() => navigate('/taxpayers')} style={{ marginTop: 16 }}>กลับไปรายการ</button>
+      <button className="btn-secondary" onClick={() => navigate('/taxpayers/manage')} style={{ marginTop: 16 }}>กลับไปรายการ</button>
     </div>
   )
 
@@ -213,26 +238,112 @@ export default function TaxpayerDetailPage() {
   }
 
   const handleSavePay = async () => {
-    setPaySaving(true)
-    await new Promise(r => setTimeout(r, 500))
     const amt = parseFloat(payAmt) || 0
-    const allocLand = Math.min(amt, assess?.landAmount ?? 0)
-    const allocSign = Math.min(amt - allocLand, assess?.signAmount ?? 0)
-    const pay: Payment = {
-      id: `pay${Date.now()}`, taxpayerId: tp.id, amount: amt,
-      date: payDate, method: payMethod, refNo: payMethod === 'transfer' ? payRef : undefined,
-      receiptNo: payMethod === 'cash' ? payReceipt : undefined,
-      allocatedLand: allocLand, allocatedSign: allocSign, recordedBy: currentUser?.id ?? 'u1'
+    const allocLand = payTaxScope === 'sign' ? 0 : parseFloat(payLandAlloc) || 0
+    const allocSign = payTaxScope === 'land' ? 0 : parseFloat(paySignAlloc) || 0
+    if (amt <= 0) return alert('กรุณากรอกยอดเงินที่รับชำระ')
+    if (Math.abs(allocLand + allocSign - amt) > 0.009) return alert('ผลรวมยอดจัดสรรต้องเท่ากับยอดเงินที่รับชำระ')
+    if (allocLand > landRem) return alert('ยอดจัดสรรภาษีที่ดินเกินยอดคงเหลือ')
+    if (allocSign > signRem) return alert('ยอดจัดสรรภาษีป้ายเกินยอดคงเหลือ')
+    const allocations: { assessment_id: number; allocated_amount: number }[] = []
+    if (allocLand > 0 && assess?.landAssessmentId) allocations.push({ assessment_id: Number(assess.landAssessmentId), allocated_amount: allocLand })
+    if (allocSign > 0 && assess?.signAssessmentId) allocations.push({ assessment_id: Number(assess.signAssessmentId), allocated_amount: allocSign })
+    if (allocations.some(item => !Number.isFinite(item.assessment_id) || item.assessment_id <= 0)) return alert('ไม่พบรหัสการประเมินภาษี กรุณารีเฟรชหน้าแล้วลองใหม่')
+
+    try {
+      setPaySaving(true)
+      const paymentId = await createCompletePayment({
+        payment_amount: amt,
+        payment_date: payDate,
+        payment_method: payMethod,
+        reference_no: payMethod === 'transfer' ? payRef || null : null,
+        receipt_no: payMethod === 'cash' ? payReceipt || null : null,
+        recorded_by: currentUser?.id ? Number(currentUser.id) : null,
+        allocations,
+      })
+      const pay: Payment = {
+        id: paymentId, taxpayerId: tp.id, amount: amt,
+        date: payDate, method: payMethod, refNo: payMethod === 'transfer' ? payRef : undefined,
+        receiptNo: payMethod === 'cash' ? payReceipt : undefined,
+        allocatedLand: allocLand, allocatedSign: allocSign, recordedBy: currentUser?.id ?? ''
+      }
+      addPayment(pay)
+      setPaySaved(true)
+      setTimeout(() => { setPaySaved(false); setShowPayModal(false) }, 1200)
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'บันทึกการชำระไม่สำเร็จ')
+    } finally {
+      setPaySaving(false)
     }
-    addPayment(pay)
-    setPaySaving(false); setPaySaved(true)
-    setTimeout(() => { setPaySaved(false); setShowPayModal(false) }, 1200)
   }
 
   const totalRemaining = landRem + signRem
   const payAmt_num = parseFloat(payAmt) || 0
-  const toAllocate = Math.min(payAmt_num, totalRemaining)
-  const change = payAmt_num - toAllocate
+  const allocatedTotal = (parseFloat(payLandAlloc) || 0) + (parseFloat(paySignAlloc) || 0)
+
+  const updatePaymentAmount = (raw: string) => {
+    setPayAmt(raw)
+    const amount = parseFloat(raw) || 0
+    if (payTaxScope === 'land') { setPayLandAlloc(String(Math.min(amount, landRem))); setPaySignAlloc('') }
+    else if (payTaxScope === 'sign') { setPayLandAlloc(''); setPaySignAlloc(String(Math.min(amount, signRem))) }
+  }
+
+  const selectPayScope = (scope: 'land' | 'sign' | 'both') => {
+    setPayTaxScope(scope)
+    const amount = parseFloat(payAmt) || 0
+    if (scope === 'land') { setPayLandAlloc(String(Math.min(amount, landRem))); setPaySignAlloc('') }
+    else if (scope === 'sign') { setPayLandAlloc(''); setPaySignAlloc(String(Math.min(amount, signRem))) }
+    else { const land = Math.min(amount, landRem); setPayLandAlloc(String(land)); setPaySignAlloc(String(Math.min(amount - land, signRem))) }
+  }
+
+  async function saveMaster() {
+    if (!editing) return
+    if (editing.type === 'individual') {
+      const calculatedCode = generateOwnerCode(editing.firstName, editing.lastName)
+      const otherOwnerCodes = taxpayers
+        .filter(other => other.id !== editing.id)
+        .map(other => other.ownerCode)
+
+      if (!calculatedCode) {
+        alert('ไม่สามารถสร้างรหัสเจ้าของทรัพย์สินได้ กรุณาตรวจสอบชื่อและนามสกุล')
+        return
+      }
+      if (isDuplicateCode(calculatedCode, otherOwnerCodes)) {
+        alert(`รหัส ${calculatedCode} ซ้ำกับผู้เสียภาษีที่มีอยู่แล้ว กรุณาตรวจสอบชื่อและนามสกุล`)
+        return
+      }
+
+      // คำนวณใหม่ตอนกดบันทึกอีกครั้ง เพื่อให้ใช้ logic เดียวกับหน้าเพิ่มผู้เสียภาษีเสมอ
+      editing.ownerCode = calculatedCode
+    }
+    try {
+      setMasterSaving(true)
+      await updateTaxpayerMaster(Number(editing.id), { taxpayer_type: editing.type === 'company' ? 'COMPANY' : 'INDIVIDUAL', owner_code: editing.type === 'individual' ? editing.ownerCode : null, first_name: editing.type === 'individual' ? editing.firstName : null, last_name: editing.type === 'individual' ? editing.lastName : null, company_name: editing.type === 'company' ? editing.companyName ?? null : null, phone: editing.phone || null, address: editing.address || null, group_code: editing.group, is_active: editing.active })
+      await refreshData(); setEditing(null); setSearchParams({}, { replace: true }); alert('บันทึกข้อมูลผู้เสียภาษีเรียบร้อยแล้ว')
+    } catch (error) { alert(error instanceof Error ? error.message : 'บันทึกไม่สำเร็จ') }
+    finally { setMasterSaving(false) }
+  }
+
+  const updateEditingName = (field: 'firstName' | 'lastName', value: string) => {
+    setEditing(previous => {
+      if (!previous || previous.type !== 'individual') return previous
+      const firstName = field === 'firstName' ? value : previous.firstName
+      const lastName = field === 'lastName' ? value : previous.lastName
+      return {
+        ...previous,
+        [field]: value,
+        ownerCode: firstName.trim() && lastName.trim()
+          ? generateOwnerCode(firstName, lastName)
+          : ''
+      }
+    })
+  }
+
+  async function handleDeleteMaster(target: Taxpayer) {
+    if (!confirm(`ลบ ${getTaxpayerName(target)} ออกจากฐานข้อมูลถาวรหรือไม่?`)) return
+    try { await deleteTaxpayerMaster(Number(target.id)); await refreshData(); navigate('/taxpayers/manage') }
+    catch (error) { alert(error instanceof Error ? error.message : 'ลบไม่สำเร็จ') }
+  }
 
   return (
     <div style={{ padding: 24, maxWidth: 1100 }}>
@@ -240,7 +351,7 @@ export default function TaxpayerDetailPage() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20, fontSize: 13, color: '#a89cc8' }}>
         <button className="btn-ghost" onClick={() => navigate('/dashboard')} style={{ fontSize: 13, padding: '4px 8px' }}>หน้าหลัก</button>
         <span>›</span>
-        <button className="btn-ghost" onClick={() => navigate('/taxpayers')} style={{ fontSize: 13, padding: '4px 8px' }}>ผู้เสียภาษี</button>
+        <button className="btn-ghost" onClick={() => navigate('/taxpayers/manage')} style={{ fontSize: 13, padding: '4px 8px' }}>จัดการผู้เสียภาษี</button>
         <span>›</span>
         <span style={{ color: '#2d2545', fontWeight: 600 }}>{getTaxpayerName(tp)}</span>
       </div>
@@ -261,7 +372,7 @@ export default function TaxpayerDetailPage() {
                   <div style={{ fontSize: 12, color: '#a89cc8', fontFamily: 'monospace' }}>{tp.ownerCode}</div>
                 </div>
               </div>
-              <StatusBadge status={payStat} />
+              <div style={{ display: 'flex', gap: 8 }}><button className="btn-secondary" onClick={() => setEditing({ ...tp })}>✏️ แก้ไขข้อมูล</button><button className="btn-ghost" style={{ color: '#c0392b' }} onClick={() => handleDeleteMaster(tp)}>🗑 ลบข้อมูลผู้เสียภาษี</button><StatusBadge status={payStat} /></div>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, fontSize: 13 }}>
               <div><div style={{ fontSize: 11, color: '#a89cc8', marginBottom: 2 }}>เบอร์โทร</div><div style={{ fontWeight: 500 }}>{tp.phone}</div></div>
@@ -356,6 +467,22 @@ export default function TaxpayerDetailPage() {
       </div>
 
       {/* Follow-up Modal */}
+      {editing && <Modal title="แก้ไขข้อมูลผู้เสียภาษี" onClose={() => setEditing(null)} maxWidth="680px">
+        <div style={{ padding: '10px 14px', borderRadius: 10, background: 'rgba(240,236,251,.55)', color: '#6b5b95', fontSize: 12, marginBottom: 18 }}>
+          แก้ไขข้อมูลหลักของผู้เสียภาษี ช่องที่มีเครื่องหมาย * จำเป็นต้องกรอก ข้อมูลที่บันทึกจะอัปเดตในฐานข้อมูลทันที
+        </div>
+        <form onSubmit={e => { e.preventDefault(); void saveMaster() }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <div><label style={LBL}>ประเภทผู้เสียภาษี</label><input className="input-field" value={editing.type === 'company' ? 'นิติบุคคล / บริษัท' : 'บุคคลธรรมดา'} disabled /></div>
+            {editing.type === 'individual' && <div><label style={LBL}>รหัสเจ้าของทรัพย์สิน (สร้างอัตโนมัติ)</label><input className="input-field" value={editing.ownerCode} readOnly style={{ background: 'rgba(240,236,251,.55)', color: '#7055ae', fontWeight: 600 }} /><div style={{ fontSize: 10, color: '#a89cc8', marginTop: 4 }}>รหัสจะเปลี่ยนอัตโนมัติเมื่อแก้ชื่อหรือนามสกุล</div></div>}
+            {editing.type === 'individual' ? <><div><label style={LBL}>ชื่อ *</label><input className="input-field" value={editing.firstName} required onChange={e => updateEditingName('firstName', e.target.value)}/></div><div><label style={LBL}>นามสกุล *</label><input className="input-field" value={editing.lastName} required onChange={e => updateEditingName('lastName', e.target.value)}/></div></> : <div style={{gridColumn:'1/-1'}}><label style={LBL}>ชื่อบริษัท / นิติบุคคล *</label><input className="input-field" value={editing.companyName ?? ''} required onChange={e => setEditing({...editing, companyName:e.target.value})}/></div>}
+            <div><label style={LBL}>เบอร์โทรศัพท์ *</label><input className="input-field" value={editing.phone} required onChange={e => setEditing({...editing, phone:e.target.value})}/></div>
+            <div><label style={LBL}>กลุ่มผู้รับผิดชอบ *</label><select className="input-field" value={editing.group} onChange={e => setEditing({...editing, group:e.target.value as Taxpayer['group']})}><option>ก-น</option><option>บ-ล</option><option>ส-ศ</option><option>ว-ฮ และบริษัท</option></select></div>
+            <div style={{gridColumn:'1/-1'}}><label style={LBL}>ที่อยู่ *</label><textarea className="input-field" rows={3} value={editing.address} required onChange={e => setEditing({...editing, address:e.target.value})}/></div>
+          </div>
+          <div style={{display:'flex',justifyContent:'space-between',gap:8,marginTop:20,paddingTop:16,borderTop:'1px solid rgba(200,190,240,.25)'}}><button type="button" className="btn-ghost" style={{color:'#c0392b'}} onClick={() => handleDeleteMaster(editing)}>🗑 ลบข้อมูลผู้เสียภาษี</button><div style={{display:'flex',gap:8}}><button type="button" className="btn-secondary" onClick={() => setEditing(null)}>ยกเลิก</button><button type="submit" className="btn-primary" disabled={masterSaving}>{masterSaving ? 'กำลังบันทึก...' : '💾 บันทึกข้อมูล'}</button></div></div>
+        </form>
+      </Modal>}
       {showFollowModal && (
         <Modal title="บันทึกการติดตาม" onClose={() => setShowFollowModal(false)}>
           {fuSaved ? (
@@ -438,12 +565,27 @@ export default function TaxpayerDetailPage() {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
                 <div>
                   <label style={LBL}>ยอดเงินที่ได้รับ (บาท) *</label>
-                  <input className="input-field" type="number" step="0.01" placeholder="0.00" value={payAmt} onChange={e => setPayAmt(e.target.value)} autoFocus />
+                  <input className="input-field" type="number" step="0.01" placeholder="0.00" value={payAmt} onChange={e => updatePaymentAmount(e.target.value)} autoFocus />
                 </div>
                 <div>
-                  <label style={LBL}>วันที่ชำระ</label>
-                  <input className="input-field" type="date" value={payDate} onChange={e => setPayDate(e.target.value)} />
+                  <label style={LBL}>วันที่และเวลาที่ชำระ *</label>
+                  <input className="input-field" type="datetime-local" value={payDate} onChange={e => setPayDate(e.target.value)} />
                 </div>
+              </div>
+              <div style={{ marginBottom: 16 }}>
+                <label style={LBL}>เลือกประเภทภาษีที่ต้องการตัดยอด *</label>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {[
+                    ['land', `🏠 ภาษีที่ดินฯ · ค้าง ฿${formatCurrency(landRem)}`],
+                    ['sign', `🪧 ภาษีป้าย · ค้าง ฿${formatCurrency(signRem)}`],
+                    ['both', '🏠 + 🪧 ชำระทั้งสองประเภท']
+                  ].map(([value, label]) => <button key={value} type="button" onClick={() => selectPayScope(value as 'land' | 'sign' | 'both')} style={{ padding: '8px 12px', borderRadius: 18, cursor: 'pointer', fontFamily: "'Sarabun',sans-serif", fontSize: 12, border: payTaxScope === value ? '1.5px solid #7c5cbf' : '1px solid rgba(180,165,230,.35)', background: payTaxScope === value ? 'rgba(124,92,191,.12)' : '#fff', color: payTaxScope === value ? '#6745ae' : '#6b5b95', fontWeight: payTaxScope === value ? 700 : 500 }}>{label}</button>)}
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: payTaxScope === 'both' ? '1fr 1fr' : '1fr', gap: 12, marginBottom: 16, padding: 14, background: 'rgba(240,236,251,.45)', borderRadius: 12 }}>
+                {payTaxScope !== 'sign' && <div><label style={LBL}>ยอดตัดภาษีที่ดินฯ (บาท) *</label><input className="input-field" type="number" step="0.01" value={payLandAlloc} onChange={e => setPayLandAlloc(e.target.value)} /></div>}
+                {payTaxScope !== 'land' && <div><label style={LBL}>ยอดตัดภาษีป้าย (บาท) *</label><input className="input-field" type="number" step="0.01" value={paySignAlloc} onChange={e => setPaySignAlloc(e.target.value)} /></div>}
+                <div style={{ gridColumn: '1/-1', display: 'flex', justifyContent: 'space-between', fontSize: 12, color: Math.abs(allocatedTotal - payAmt_num) < .009 ? '#1a8f5a' : '#c0392b' }}><span>รวมยอดจัดสรร</span><strong>฿{formatCurrency(allocatedTotal)} / ฿{formatCurrency(payAmt_num)}</strong></div>
               </div>
               <div style={{ marginBottom: 14 }}>
                 <label style={LBL}>วิธีชำระ</label>
@@ -474,8 +616,8 @@ export default function TaxpayerDetailPage() {
                   {[
                     ['ยอดคงเหลือ', `฿${formatCurrency(totalRemaining)}`, '#2d2545'],
                     ['รับเงินจริง', `฿${formatCurrency(payAmt_num)}`, '#7c5cbf'],
-                    ['นำไปตัดภาษี', `฿${formatCurrency(toAllocate)}`, '#1a8f5a'],
-                    ['ส่วนต่าง', `฿${formatCurrency(change)}`, change > 0 ? '#8a5a00' : '#1a8f5a'],
+                    ['ตัดภาษีที่ดินฯ', `฿${formatCurrency(parseFloat(payLandAlloc) || 0)}`, '#3a5fbf'],
+                    ['ตัดภาษีป้าย', `฿${formatCurrency(parseFloat(paySignAlloc) || 0)}`, '#7c5cbf'],
                   ].map(([l, v, c]) => (
                     <div key={String(l)}>
                       <div style={{ fontSize: 11, color: '#a89cc8' }}>{l}</div>
@@ -486,7 +628,7 @@ export default function TaxpayerDetailPage() {
               )}
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
                 <button className="btn-secondary" onClick={() => setShowPayModal(false)}>ยกเลิก</button>
-                <button className="btn-primary" onClick={handleSavePay} disabled={paySaving || !payAmt}>
+                <button className="btn-primary" onClick={handleSavePay} disabled={paySaving || !payAmt || !payDate || Math.abs(allocatedTotal - payAmt_num) > .009}>
                   {paySaving ? '⏳...' : '✅ ยืนยันการชำระ'}
                 </button>
               </div>
