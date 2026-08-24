@@ -18,6 +18,8 @@ import {
   getUserById
 } from '../data/mockData'
 import type { Taxpayer, Payment } from '../types'
+import PaymentForm from '../components/PaymentForm'
+import { readPaymentSlip } from '../api/slips'
 
 const CALL_RESULT_LABELS: Record<string, string> = {
   no_answer: 'ไม่รับสาย', reached: 'ติดต่อได้', callback: 'จะโทรกลับ',
@@ -52,6 +54,10 @@ export default function SearchPaymentPage() {
   const [candidates, setCandidates] = useState<Candidate[]>([])
   const [searched, setSearched] = useState(false)
   const [searchedAmt, setSearchedAmt] = useState('')
+  const [slipReading, setSlipReading] = useState(false)
+  const [slipMessage, setSlipMessage] = useState('')
+  const [slipDragging, setSlipDragging] = useState(false)
+  const [selectedSlipName, setSelectedSlipName] = useState('')
 
   // Drawer state
   const [drawerTp, setDrawerTp] = useState<Taxpayer | null>(null)
@@ -79,6 +85,7 @@ export default function SearchPaymentPage() {
   const [toast, setToast] = useState(false)
 
   const inputRef = useRef<HTMLInputElement>(null)
+  const slipInputRef = useRef<HTMLInputElement>(null)
 
   const isDirector = currentUser?.role !== 'officer'
   const GROUPS = ['ก-น', 'บ-ล', 'ส-ศ', 'ว-ฮ และบริษัท']
@@ -260,6 +267,32 @@ export default function SearchPaymentPage() {
     setSearchedAmt(amtInput)
   }
 
+  const handleSlipFile = async (file?: File) => {
+    if (!file) return
+    setSelectedSlipName(file.name)
+    setSlipMessage('')
+    try {
+      setSlipReading(true)
+      const result = await readPaymentSlip(file)
+      if (result.amount === null) {
+        setSlipMessage('อ่านรูปได้ แต่ไม่พบยอดเงินรูปแบบ 0.00 กรุณากรอกยอดเอง')
+        return
+      }
+      setAmtInput(result.amount.toFixed(2))
+    } catch (error) {
+      setSlipMessage(error instanceof Error ? error.message : 'อ่านสลิปไม่สำเร็จ')
+    } finally {
+      setSlipReading(false)
+    }
+  }
+
+  const removeSlipFile = () => {
+    setSelectedSlipName('')
+    setSlipMessage('')
+    setAmtInput('')
+    if (slipInputRef.current) slipInputRef.current.value = ''
+  }
+
   const exactCandidates = candidates.filter(c => c.exact)
   const nearCandidates = candidates.filter(c => !c.exact)
 
@@ -393,6 +426,62 @@ export default function SearchPaymentPage() {
             🔍 ค้นหายอด
           </button>
         </div>
+
+        <div
+          role="button"
+          tabIndex={0}
+          aria-label="แนบสลิปเพื่ออ่านยอดเงิน"
+          onClick={() => !slipReading && slipInputRef.current?.click()}
+          onKeyDown={e => {
+            if ((e.key === 'Enter' || e.key === ' ') && !slipReading) {
+              e.preventDefault()
+              slipInputRef.current?.click()
+            }
+          }}
+          onDragEnter={e => { e.preventDefault(); if (!slipReading) setSlipDragging(true) }}
+          onDragOver={e => { e.preventDefault(); if (!slipReading) setSlipDragging(true) }}
+          onDragLeave={e => { e.preventDefault(); setSlipDragging(false) }}
+          onDrop={e => {
+            e.preventDefault()
+            setSlipDragging(false)
+            if (!slipReading) void handleSlipFile(e.dataTransfer.files?.[0])
+          }}
+          style={{
+            marginTop: 14,
+            maxWidth: 510,
+            minHeight: 76,
+            padding: '14px 16px',
+            borderRadius: 12,
+            border: slipDragging ? '2px dashed #7c5cbf' : '1.5px dashed rgba(124,92,191,.42)',
+            background: slipDragging ? 'rgba(124,92,191,.1)' : 'rgba(248,246,255,.72)',
+            cursor: slipReading ? 'wait' : 'pointer',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: 14,
+            transition: 'all .15s ease',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+            <div style={{ width: 38, height: 38, borderRadius: 10, background: 'rgba(124,92,191,.12)', display: 'grid', placeItems: 'center', fontSize: 19 }}>📎</div>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#5f4794' }}>
+                {slipReading ? 'กำลังอ่านข้อมูลจากสลิป...' : slipDragging ? 'วางไฟล์ตรงนี้' : 'วางสลิปหรือคลิกเพื่อเลือกรูป'}
+              </div>
+              <div style={{ marginTop: 3, fontSize: 11, color: '#a89cc8' }}>PNG, JPG, JPEG, WEBP · ไม่เกิน 10 MB · ไม่เก็บไฟล์ในระบบ</div>
+            </div>
+          </div>
+          <button type="button" className="btn-secondary" disabled={slipReading} onClick={e => { e.stopPropagation(); slipInputRef.current?.click() }}>
+            {slipReading ? 'รอสักครู่' : 'เลือกไฟล์'}
+          </button>
+          <input ref={slipInputRef} type="file" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp" hidden disabled={slipReading} onChange={e => { void handleSlipFile(e.target.files?.[0]); e.currentTarget.value = '' }} />
+        </div>
+
+        {selectedSlipName && <div style={{ marginTop: 10, maxWidth: 510, padding: '9px 12px', borderRadius: 9, background: 'rgba(240,236,251,.55)', color: '#6b5b95', fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{selectedSlipName}</span>
+          <button type="button" aria-label={`ลบไฟล์ ${selectedSlipName}`} onClick={removeSlipFile} style={{ border: 0, background: 'transparent', color: '#c0392b', cursor: 'pointer', fontSize: 17, lineHeight: 1, padding: '2px 4px', flexShrink: 0 }}>×</button>
+        </div>}
+        {slipMessage && <div style={{ marginTop: 8, maxWidth: 510, color: '#c0392b', fontSize: 11 }}>{slipMessage}</div>}
 
         {/* Advanced filter toggle */}
         <button onClick={() => setShowAdvanced(v => !v)} style={{
@@ -629,7 +718,8 @@ export default function SearchPaymentPage() {
       {/* Confirm Payment Modal */}
       {showPayModal && drawerTp && (
         <Modal title="ยืนยันการชำระ" onClose={() => setShowPayModal(false)} maxWidth="500px">
-          {saved ? (
+          <PaymentForm key={`${drawerTp.id}-${selectedYear}-${payAmt}`} taxpayer={drawerTp} year={selectedYear} initialAmount={payAmt} initialMethod={payMethod} onCancel={() => setShowPayModal(false)} onSuccess={() => { showSuccessToast(); setShowPayModal(false); setDrawerTp(null); setCandidates(prev => prev.filter(c => c.tp.id !== drawerTp.id)) }} />
+          {false && (saved ? (
             <div style={{ textAlign: 'center', padding: '28px 0' }}>
               <div style={{ fontSize: 44, marginBottom: 12 }}>✅</div>
               <div style={{ fontSize: 16, fontWeight: 700, color: '#1a8f5a' }}>บันทึกการชำระเรียบร้อยแล้ว</div>
@@ -707,7 +797,7 @@ export default function SearchPaymentPage() {
                 </button>
               </div>
             </>
-          )}
+          ))}
         </Modal>
       )}
 
@@ -742,6 +832,9 @@ export default function SearchPaymentPage() {
               </div>
 
               {cashTp && (
+                <PaymentForm key={`${cashTp.id}-${selectedYear}`} taxpayer={cashTp} year={selectedYear} initialMethod="cash" initialAmount={Number(cashAmt) || undefined} onCancel={() => { setCashTp(null); setCashSearch(''); setShowCashModal(false) }} onSuccess={() => { showSuccessToast(); setShowCashModal(false); setCashTp(null); setCashSearch('') }} />
+              )}
+              {false && cashTp && (
                 <>
                   <div style={{ padding: '10px 14px', background: 'rgba(240,236,251,0.5)', borderRadius: 10, marginBottom: 14 }}>
                     <div style={{ fontSize: 13, fontWeight: 600, color: '#2d2545' }}>{getTaxpayerName(cashTp)}</div>
@@ -764,12 +857,12 @@ export default function SearchPaymentPage() {
                 </>
               )}
 
-              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              {!cashTp && <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
                 <button className="btn-secondary" onClick={() => setShowCashModal(false)}>ยกเลิก</button>
                 <button className="btn-primary" onClick={handleCashSave} disabled={cashSaving || !cashTp || !cashAmt}>
                   {cashSaving ? '⏳...' : '💾 บันทึกการชำระ'}
                 </button>
-              </div>
+              </div>}
             </>
           )}
         </Modal>
@@ -902,7 +995,9 @@ function DirectPaymentTab() {
           )}
         </div>
 
-        {selectedTp && (
+        {selectedTp && <PaymentForm key={`${selectedTp.id}-${selectedYear}`} taxpayer={selectedTp} year={selectedYear} initialMethod="cash" onCancel={() => { setSelectedTp(null); setSearch('') }} onSuccess={() => { setToast(true); setTimeout(() => setToast(false), 3500); setSelectedTp(null); setSearch('') }} />}
+
+        {false && selectedTp && (
           <>
             {/* Compact profile */}
             <div style={{ padding: '12px 14px', background: 'rgba(240,236,251,0.5)', borderRadius: 12, marginBottom: 18, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>

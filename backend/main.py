@@ -1,4 +1,6 @@
-from fastapi import FastAPI, HTTPException
+import subprocess
+
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.encoders import jsonable_encoder
@@ -14,6 +16,7 @@ from payments import Payments
 from follow_up_logs import Follow_up_logs
 from taxpayer_year_records import Taxpayer_year_records
 from payment_allocations import Payment_allocations
+from slip_ocr import read_slip
 
 app = FastAPI(
     title="Tax Collection API",
@@ -189,6 +192,27 @@ def get_payment_allocations():
                 "message": "ไม่สามารถดึงข้อมูลการจัดสรรยอดชำระได้",
                 "error": str(error)
             }
+        )
+
+@app.post("/api/slips/read")
+async def read_payment_slip(request: Request):
+    """OCR รูปสลิปแบบชั่วคราว: ไม่บันทึกรูปหรือข้อความ OCR ลงฐานข้อมูล"""
+    try:
+        content_type = request.headers.get("content-type", "").split(";", 1)[0].lower()
+        result = read_slip(await request.body(), content_type)
+        return {
+            "success": True,
+            "message": "อ่านสลิปเรียบร้อย กรุณาตรวจสอบยอดก่อนค้นหา",
+            "data": result,
+        }
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=408, detail="ใช้เวลาอ่านสลิปนานเกินไป กรุณาลองรูปที่ชัดขึ้น")
+    except Exception as error:
+        raise HTTPException(
+            status_code=500,
+            detail={"message": "อ่านข้อมูลจากสลิปไม่สำเร็จ", "error": str(error)},
         )
 
 @app.get("/api/follow-up-logs")

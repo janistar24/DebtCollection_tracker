@@ -45,15 +45,26 @@ export async function createCompletePayment(data: CompletePaymentInput): Promise
 }
 
 export async function getAllocatedPayments(): Promise<Payment[]> {
-  const response = await fetch(`${API_URL}/payment-allocations`)
+  const response = await fetch(
+    `${API_URL}/payment-allocations`
+  )
+
   const result = await response.json()
+
   if (!response.ok || !result.success) {
-    throw new Error(errorMessage(result, 'โหลดข้อมูลการชำระไม่สำเร็จ'))
+    throw new Error(
+      errorMessage(
+        result,
+        'โหลดข้อมูลการชำระไม่สำเร็จ'
+      )
+    )
   }
 
   const grouped = new Map<string, Payment>()
+
   for (const row of result.data as AllocationApi[]) {
     const id = String(row.payment_id)
+
     const payment = grouped.get(id) ?? {
       id,
       taxpayerId: String(row.taxpayer_id),
@@ -64,11 +75,26 @@ export async function getAllocatedPayments(): Promise<Payment[]> {
       receiptNo: row.receipt_no ?? undefined,
       allocatedLand: 0,
       allocatedSign: 0,
-      recordedBy: row.recorded_by === null ? '' : String(row.recorded_by),
+      recordedBy:
+        row.recorded_by === null
+          ? ''
+          : String(row.recorded_by),
     }
-    if (row.tax_type === 'LAND_BUILDING') payment.allocatedLand += Number(row.allocated_amount)
-    if (row.tax_type === 'SIGN') payment.allocatedSign += Number(row.allocated_amount)
+
+    if (row.tax_type === 'LAND_BUILDING') {
+      payment.allocatedLand += Number(
+        row.allocated_amount
+      )
+    }
+
+    if (row.tax_type === 'SIGN') {
+      payment.allocatedSign += Number(
+        row.allocated_amount
+      )
+    }
+
     grouped.set(id, payment)
   }
+
   return [...grouped.values()]
 }

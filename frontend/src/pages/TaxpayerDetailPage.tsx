@@ -12,6 +12,7 @@ import type { FollowUp, Payment, Taxpayer } from '../types'
 import { deleteTaxpayerMaster, updateTaxpayerMaster } from '../api/taxpayers'
 import { generateOwnerCode, isDuplicateCode } from '../utils/ownerCode'
 import { createCompletePayment } from '../api/payments'
+import PaymentForm from '../components/PaymentForm'
 
 // Extract short keyword tags from a freeform note string
 function extractTags(tp: Taxpayer): { label: string; year: number; note: string }[] {
@@ -245,6 +246,8 @@ export default function TaxpayerDetailPage() {
     if (Math.abs(allocLand + allocSign - amt) > 0.009) return alert('ผลรวมยอดจัดสรรต้องเท่ากับยอดเงินที่รับชำระ')
     if (allocLand > landRem) return alert('ยอดจัดสรรภาษีที่ดินเกินยอดคงเหลือ')
     if (allocSign > signRem) return alert('ยอดจัดสรรภาษีป้ายเกินยอดคงเหลือ')
+    if (allocLand > 0 && !assess?.landAssessmentId) return alert('ไม่พบรหัสการประเมินภาษีที่ดินของปีนี้ กรุณารีเฟรชหน้าแล้วลองใหม่')
+    if (allocSign > 0 && !assess?.signAssessmentId) return alert('ไม่พบรหัสการประเมินภาษีป้ายของปีนี้ กรุณารีเฟรชหน้าแล้วลองใหม่')
     const allocations: { assessment_id: number; allocated_amount: number }[] = []
     if (allocLand > 0 && assess?.landAssessmentId) allocations.push({ assessment_id: Number(assess.landAssessmentId), allocated_amount: allocLand })
     if (allocSign > 0 && assess?.signAssessmentId) allocations.push({ assessment_id: Number(assess.signAssessmentId), allocated_amount: allocSign })
@@ -254,7 +257,8 @@ export default function TaxpayerDetailPage() {
       setPaySaving(true)
       const paymentId = await createCompletePayment({
         payment_amount: amt,
-        payment_date: payDate,
+        // ฐานข้อมูลปัจจุบันเป็นชนิด DATE จึงส่งเฉพาะ YYYY-MM-DD
+        payment_date: payDate.slice(0, 10),
         payment_method: payMethod,
         reference_no: payMethod === 'transfer' ? payRef || null : null,
         receipt_no: payMethod === 'cash' ? payReceipt || null : null,
@@ -551,7 +555,8 @@ export default function TaxpayerDetailPage() {
       {/* Payment Modal */}
       {showPayModal && (
         <Modal title="บันทึกการชำระ" onClose={() => setShowPayModal(false)}>
-          {paySaved ? (
+          <PaymentForm taxpayer={tp} year={CURRENT_YEAR} onCancel={() => setShowPayModal(false)} onSuccess={() => setShowPayModal(false)} />
+          {false && (paySaved ? (
             <div style={{ textAlign: 'center', padding: '24px 0' }}>
               <div style={{ fontSize: 36, marginBottom: 8 }}>✅</div>
               <div style={{ fontWeight: 600, color: '#1a8f5a' }}>บันทึกการชำระเรียบร้อย</div>
@@ -633,7 +638,7 @@ export default function TaxpayerDetailPage() {
                 </button>
               </div>
             </>
-          )}
+          ))}
         </Modal>
       )}
     </div>
