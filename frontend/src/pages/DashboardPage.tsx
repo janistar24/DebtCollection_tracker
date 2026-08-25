@@ -15,11 +15,18 @@ import {
 import type { FollowUp } from '../types'
 
 const FOLLOW_FILTER_LABELS = [
-  { key: 'all', label: 'ทั้งหมด' },
   { key: 'none', label: 'ยังไม่ได้ติดต่อ' },
   { key: 'followed', label: 'ติดต่อแล้ว' },
   { key: 'nocontact', label: 'ติดต่อไม่ได้' },
-]
+] as const
+
+const PAYMENT_FILTER_LABELS = [
+  { key: 'partial', label: 'ชำระบางส่วน' },
+  { key: 'unpaid', label: 'ยังไม่ชำระ' },
+] as const
+
+type FollowFilterKey = typeof FOLLOW_FILTER_LABELS[number]['key']
+type PaymentFilterKey = typeof PAYMENT_FILTER_LABELS[number]['key']
 
 const DONUT_COLORS = ['#7c5cbf', '#c4b5f0', '#f0a0a0']
 
@@ -266,7 +273,9 @@ function CallLogModal({ onClose, onSave }: { onClose: () => void; onSave: (fu: O
 export default function DashboardPage() {
   const { currentUser, taxpayers, selectedYear, addFollowUp } = useApp()
   const navigate = useNavigate()
-  const [filterKey, setFilterKey] = useState('all')
+  const [followFilters, setFollowFilters] = useState<FollowFilterKey[]>([])
+  const [paymentFilters, setPaymentFilters] = useState<PaymentFilterKey[]>([])
+  const [showTaskFilters, setShowTaskFilters] = useState(false)
   const [showCallLog, setShowCallLog] = useState(false)
   const [callLogToast, setCallLogToast] = useState(false)
 
@@ -336,12 +345,37 @@ export default function DashboardPage() {
   const filteredTps = myTaxpayers.filter(tp => {
     const payStat = getPaymentStatus(tp, selectedYear)
     const followStat = getFollowStatus(tp)
-    if (filterKey === 'all') return payStat !== 'paid'
-    if (filterKey === 'none') return followStat === 'none' && payStat !== 'paid'
-    if (filterKey === 'followed') return (followStat === 'followed' || followStat === 'promised') && payStat !== 'paid'
-    if (filterKey === 'nocontact') return followStat === 'dispute' && payStat !== 'paid'
-    return true
+
+    // ตารางงานวันนี้ไม่แสดงผู้ที่ชำระครบแล้ว
+    if (payStat === 'paid') return false
+
+    const matchesPayment = paymentFilters.length === 0
+      || paymentFilters.includes(payStat as PaymentFilterKey)
+
+    const matchesFollow = followFilters.length === 0
+      || followFilters.some(filter => {
+        if (filter === 'none') return followStat === 'none'
+        if (filter === 'followed') return followStat === 'followed' || followStat === 'promised'
+        if (filter === 'nocontact') return followStat === 'dispute'
+        return false
+      })
+
+    return matchesPayment && matchesFollow
   }).slice(0, 50)
+
+  const toggleFollowFilter = (key: FollowFilterKey) => {
+    setFollowFilters(current => current.includes(key)
+      ? current.filter(item => item !== key)
+      : [...current, key])
+  }
+
+  const togglePaymentFilter = (key: PaymentFilterKey) => {
+    setPaymentFilters(current => current.includes(key)
+      ? current.filter(item => item !== key)
+      : [...current, key])
+  }
+
+  const activeTaskFilterCount = followFilters.length + paymentFilters.length
 
   const handleCallLogSave = (fu: Omit<FollowUp, 'id'>) => {
     addFollowUp({ ...fu, id: `fu${Date.now()}` })
@@ -445,20 +479,26 @@ export default function DashboardPage() {
       )}
 
       {/* 3. Visualizations row */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.6fr', gap: 16, marginBottom: 24 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1.15fr 1.45fr', gap: 16, marginBottom: 24 }}>
         {/* Donut chart */}
-        <div className="glass-card" style={{ padding: '20px 22px' }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: '#2d2545', marginBottom: 16 }}>สถานะการชำระของผู้เสียภาษี</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <div style={{ width: 140, height: 140, flexShrink: 0 }}>
+        <div className="glass-card" style={{ padding: '20px 18px', minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#2d2545', marginBottom: 12 }}>สถานะการชำระของผู้เสียภาษี</div>
+          <div style={{
+            display: 'grid', gridTemplateColumns: 'minmax(190px, 1fr) 190px',
+            alignItems: 'center', gap: 10
+          }}>
+            <div style={{
+              width: '100%', maxWidth: 250, aspectRatio: '1 / 1',
+              justifySelf: 'center', minWidth: 0
+            }}>
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
-                  <Pie data={donutData} cx="50%" cy="50%" innerRadius={40} outerRadius={60}
+                  <Pie data={donutData} cx="50%" cy="50%" innerRadius="30%" outerRadius="47%"
                     dataKey="value" paddingAngle={3}
                     onClick={(_, idx) => {
-                      if (idx === 2) setFilterKey('unpaid')
-                      else if (idx === 1) setFilterKey('followed')
-                      else setFilterKey('all')
+                      if (idx === 2) setPaymentFilters(['unpaid'])
+                      else if (idx === 1) setPaymentFilters(['partial'])
+                      else setPaymentFilters([])
                     }}
                     style={{ cursor: 'pointer' }}>
                     {donutData.map((_, i) => <Cell key={i} fill={DONUT_COLORS[i]} stroke="none" />)}
@@ -467,14 +507,14 @@ export default function DashboardPage() {
                 </PieChart>
               </ResponsiveContainer>
             </div>
-            <div>
+            <div style={{ width: 190, minWidth: 190, justifySelf: 'end' }}>
               <div style={{ fontSize: 11, color: '#a89cc8', marginBottom: 2 }}>ผู้เสียภาษีทั้งหมด</div>
               <div style={{ fontSize: 22, fontWeight: 800, color: '#2d2545', marginBottom: 12 }}>{totalCount} ราย</div>
               {donutData.map((d, i) => (
                 <div key={d.name} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, cursor: 'pointer' }}
-                  onClick={() => setFilterKey(i === 2 ? 'unpaid' : i === 1 ? 'followed' : 'all')}>
+                  onClick={() => setPaymentFilters(i === 2 ? ['unpaid'] : i === 1 ? ['partial'] : [])}>
                   <div style={{ width: 10, height: 10, borderRadius: 3, background: DONUT_COLORS[i], flexShrink: 0 }} />
-                  <span style={{ fontSize: 12, color: '#6b5b95', flex: 1 }}>{d.name}</span>
+                  <span style={{ fontSize: 12, color: '#6b5b95', flex: 1, whiteSpace: 'nowrap' }}>{d.name}</span>
                   <span style={{ fontSize: 13, fontWeight: 700, color: '#2d2545' }}>{d.value} ราย</span>
                   <span style={{ fontSize: 11, color: '#a89cc8', minWidth: 34 }}>{d.pct}%</span>
                 </div>
@@ -483,53 +523,128 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Tax collection — Big Number + sub-bars */}
-        <div className="glass-card" style={{ padding: '20px 22px' }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: '#2d2545', marginBottom: 14 }}>ภาพรวมการจัดเก็บภาษี</div>
-
-          {/* Big number */}
-          <div style={{ marginBottom: 10 }}>
-            <div style={{ fontSize: 11, color: '#a89cc8' }}>ยอดภาษีที่ต้องจัดเก็บทั้งหมด</div>
-            <div style={{ fontSize: 26, fontWeight: 800, color: '#2d2545', lineHeight: 1.2 }}>฿{formatCurrency(totalAssessed)} บาท</div>
+        {/* Tax collection — compact dashboard cards (Option A) */}
+        <div className="glass-card" style={{ padding: '20px 22px', minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#2d2545', marginBottom: 14 }}>
+            ภาพรวมยอดที่ต้องจัดเก็บ
           </div>
 
-          {/* Overall progress */}
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ height: 16, borderRadius: 99, background: '#f0ecfb', overflow: 'hidden', marginBottom: 6 }}>
-              <div style={{ height: '100%', borderRadius: 99, background: 'linear-gradient(90deg,#7c5cbf,#9b7dd4)', width: `${paidPct}%`, transition: 'width 0.4s ease' }} />
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-              <div>
-                <div style={{ fontSize: 11, color: '#a89cc8' }}>รับชำระแล้ว</div>
-                <div style={{ fontSize: 15, fontWeight: 700, color: '#7c5cbf' }}>฿{formatCurrency(totalPaid)} บาท</div>
-                <div style={{ fontSize: 11, color: '#a89cc8' }}>{paidPct}%</div>
+          {/* ตัวเลขภาพรวม: ใช้ข้อมูลจริงจาก assessments และ payments */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+            gap: 12,
+            paddingBottom: 16,
+            marginBottom: 14,
+            borderBottom: '1px solid rgba(200,190,240,0.25)',
+          }}>
+            {[
+              { label: 'ยอดภาษีทั้งหมด', value: totalAssessed, color: '#2d2545' },
+              { label: 'รับชำระแล้ว', value: totalPaid, color: '#1a8f5a' },
+              { label: 'ยอดคงเหลือ', value: totalRemaining, color: '#c0392b' },
+            ].map(item => (
+              <div key={item.label} style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 11, color: '#a89cc8', marginBottom: 4 }}>{item.label}</div>
+                <div style={{
+                  fontSize: 19,
+                  lineHeight: 1.25,
+                  fontWeight: 800,
+                  color: item.color,
+                  whiteSpace: 'nowrap',
+                }}>
+                  ฿{formatCurrency(item.value)}
+                </div>
               </div>
-              <div>
-                <div style={{ fontSize: 11, color: '#a89cc8' }}>ยอดคงเหลือ</div>
-                <div style={{ fontSize: 15, fontWeight: 700, color: '#c0392b' }}>฿{formatCurrency(totalRemaining)} บาท</div>
-                <div style={{ fontSize: 11, color: '#a89cc8' }}>{100 - paidPct}%</div>
-              </div>
-            </div>
+            ))}
           </div>
 
-          <div style={{ height: 1, background: 'rgba(200,190,240,0.2)', marginBottom: 14 }} />
+          {/* การ์ดแยกประเภทภาษี */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
+            {[
+              {
+                icon: '🏠',
+                label: 'ภาษีที่ดินและสิ่งปลูกสร้าง',
+                total: landTotal,
+                paid: landPaid,
+                remaining: landRemaining,
+                pct: landPct,
+                color: '#3a5fbf',
+                background: 'rgba(228,237,255,0.46)',
+              },
+              {
+                icon: '🪧',
+                label: 'ภาษีป้าย',
+                total: signTotal,
+                paid: signPaid,
+                remaining: signRemaining,
+                pct: signPct,
+                color: '#7c5cbf',
+                background: 'rgba(240,236,251,0.62)',
+              },
+            ].map(tax => (
+              <div key={tax.label} style={{
+                padding: '14px 15px',
+                borderRadius: 14,
+                background: tax.background,
+                border: '1px solid rgba(200,190,240,0.22)',
+                minWidth: 0,
+              }}>
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  justifyContent: 'space-between',
+                  gap: 8,
+                  marginBottom: 10,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
+                    <span style={{ fontSize: 17, flexShrink: 0 }}>{tax.icon}</span>
+                    <span style={{
+                      fontSize: 12,
+                      fontWeight: 700,
+                      color: '#2d2545',
+                      lineHeight: 1.35,
+                    }}>
+                      {tax.label}
+                    </span>
+                  </div>
+                  <span style={{
+                    flexShrink: 0,
+                    fontSize: 12,
+                    fontWeight: 800,
+                    color: tax.color,
+                    background: 'rgba(255,255,255,0.72)',
+                    padding: '3px 7px',
+                    borderRadius: 99,
+                  }}>
+                    {tax.pct}%
+                  </span>
+                </div>
 
-          {/* Sub-bars by tax type */}
-          {[
-            { label: 'ภาษีที่ดินและสิ่งปลูกสร้าง', total: landTotal, paid: landPaid, remaining: landRemaining, pct: landPct, color: '#3a5fbf' },
-            { label: 'ภาษีป้าย', total: signTotal, paid: signPaid, remaining: signRemaining, pct: signPct, color: '#7c5cbf' },
-          ].map(t => (
-            <div key={t.label} style={{ marginBottom: 12 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: '#2d2545' }}>{t.label}</span>
-                <span style={{ fontSize: 11, color: '#a89cc8' }}>฿{formatCurrency(t.paid)} / ฿{formatCurrency(t.total)} บาท · {t.pct}%</span>
+                <div style={{ fontSize: 11, color: '#a89cc8', marginBottom: 2 }}>ยอดคงเหลือ</div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: '#2d2545', lineHeight: 1.2 }}>
+                  ฿{formatCurrency(tax.remaining)}
+                </div>
+                <div style={{ fontSize: 10, color: '#9487b4', marginTop: 4 }}>
+                  รับแล้ว ฿{formatCurrency(tax.paid)} จาก ฿{formatCurrency(tax.total)}
+                </div>
+
+                <div style={{ height: 7, borderRadius: 99, background: 'rgba(255,255,255,0.9)', overflow: 'hidden', marginTop: 11 }}>
+                  <div style={{
+                    height: '100%',
+                    width: `${tax.pct}%`,
+                    minWidth: tax.pct > 0 ? 4 : 0,
+                    borderRadius: 99,
+                    background: tax.color,
+                    transition: 'width 0.4s ease',
+                  }} />
+                </div>
               </div>
-              <div style={{ height: 8, borderRadius: 99, background: '#f0ecfb', overflow: 'hidden', marginBottom: 3 }}>
-                <div style={{ height: '100%', borderRadius: 99, background: `linear-gradient(90deg,${t.color},${t.color}99)`, width: `${t.pct}%`, transition: 'width 0.4s ease' }} />
-              </div>
-              <div style={{ fontSize: 11, color: '#a89cc8' }}>คงเหลือ ฿{formatCurrency(t.remaining)} บาท</div>
-            </div>
-          ))}
+            ))}
+          </div>
+
+          <div style={{ marginTop: 12, fontSize: 10, color: '#a89cc8', textAlign: 'right' }}>
+            จัดเก็บแล้วทั้งหมด {paidPct}%
+          </div>
         </div>
       </div>
 
@@ -616,17 +731,114 @@ export default function DashboardPage() {
 
       {/* 4. Task Table */}
       <div className="glass-card" style={{ padding: 0, overflow: 'hidden', marginBottom: 24 }}>
-        <div style={{ padding: '16px 22px', borderBottom: '1px solid rgba(200,190,240,0.25)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 14, fontWeight: 700, color: '#2d2545', marginRight: 4 }}>รายการงานวันนี้</span>
-          {FOLLOW_FILTER_LABELS.map(f => (
-            <button key={f.key} onClick={() => setFilterKey(f.key)} style={{
-              padding: '5px 12px', borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: 'pointer',
-              border: filterKey === f.key ? '1.5px solid #7c5cbf' : '1px solid rgba(180,165,230,0.3)',
-              background: filterKey === f.key ? 'rgba(124,92,191,0.12)' : 'transparent',
-              color: filterKey === f.key ? '#7c5cbf' : '#8873b5', fontFamily: "'Sarabun',sans-serif"
-            }}>{f.label}</button>
-          ))}
-          <span style={{ marginLeft: 'auto', fontSize: 12, color: '#a89cc8' }}>{filteredTps.length} รายการ</span>
+        <div style={{ padding: '14px 22px', borderBottom: '1px solid rgba(200,190,240,0.25)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 14, fontWeight: 700, color: '#2d2545' }}>รายการงานวันนี้</span>
+            <span style={{ marginLeft: 'auto', fontSize: 12, color: '#a89cc8' }}>{filteredTps.length} รายการ</span>
+
+            <div>
+              <button
+                type="button"
+                onClick={() => setShowTaskFilters(current => !current)}
+                aria-expanded={showTaskFilters}
+                style={{
+                  padding: '7px 12px', borderRadius: 9, fontSize: 12, fontWeight: 600,
+                  cursor: 'pointer', border: '1px solid #7c5cbf',
+                  background: activeTaskFilterCount > 0 ? '#7c5cbf' : 'rgba(124,92,191,0.08)',
+                  color: activeTaskFilterCount > 0 ? '#fff' : '#6b49ac',
+                  fontFamily: "'Sarabun',sans-serif"
+                }}
+              >
+                ⚙ ตัวกรอง{activeTaskFilterCount > 0 ? ` · ${activeTaskFilterCount}` : ''}
+              </button>
+
+            </div>
+          </div>
+
+          {showTaskFilters && (
+            <div style={{
+              display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+              gap: 22, margin: '14px -22px 0', padding: '14px 22px',
+              background: 'rgba(248,246,255,0.9)',
+              borderTop: '1px solid rgba(200,190,240,0.25)',
+              borderBottom: '1px solid rgba(200,190,240,0.25)'
+            }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#2d2545', marginBottom: 7 }}>สถานะการติดต่อ</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+                  {FOLLOW_FILTER_LABELS.map(filter => (
+                    <label key={filter.key} style={{
+                      display: 'flex', alignItems: 'center', gap: 7,
+                      fontSize: 12, color: '#5f527d', cursor: 'pointer', whiteSpace: 'nowrap'
+                    }}>
+                      <input
+                        type="checkbox"
+                        checked={followFilters.includes(filter.key)}
+                        onChange={() => toggleFollowFilter(filter.key)}
+                        style={{ width: 15, height: 15, accentColor: '#7c5cbf' }}
+                      />
+                      {filter.label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#2d2545', marginBottom: 7 }}>สถานะการชำระ</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+                  {PAYMENT_FILTER_LABELS.map(filter => (
+                    <label key={filter.key} style={{
+                      display: 'flex', alignItems: 'center', gap: 7,
+                      fontSize: 12, color: '#5f527d', cursor: 'pointer', whiteSpace: 'nowrap'
+                    }}>
+                      <input
+                        type="checkbox"
+                        checked={paymentFilters.includes(filter.key)}
+                        onChange={() => togglePaymentFilter(filter.key)}
+                        style={{ width: 15, height: 15, accentColor: '#7c5cbf' }}
+                      />
+                      {filter.label}
+                    </label>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => { setFollowFilters([]); setPaymentFilters([]) }}
+                    disabled={activeTaskFilterCount === 0}
+                    style={{
+                      marginLeft: 'auto', border: 0, background: 'transparent',
+                      color: activeTaskFilterCount > 0 ? '#c0392b' : '#b9b0ca',
+                      padding: '3px 0', fontSize: 12,
+                      textDecoration: 'underline', textUnderlineOffset: 3,
+                      cursor: activeTaskFilterCount > 0 ? 'pointer' : 'default',
+                      fontFamily: "'Sarabun',sans-serif", whiteSpace: 'nowrap'
+                    }}
+                  >ล้างทั้งหมด</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTaskFilterCount > 0 && (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
+              {followFilters.map(key => {
+                const label = FOLLOW_FILTER_LABELS.find(item => item.key === key)?.label
+                return <button key={key} type="button" onClick={() => toggleFollowFilter(key)} style={{
+                  border: '1px solid rgba(124,92,191,0.22)', borderRadius: 999, padding: '4px 9px',
+                  background: 'rgba(124,92,191,0.08)', color: '#6b49ac', fontSize: 11,
+                  cursor: 'pointer', fontFamily: "'Sarabun',sans-serif"
+                }}>{label} ×</button>
+              })}
+              {paymentFilters.map(key => {
+                const label = PAYMENT_FILTER_LABELS.find(item => item.key === key)?.label
+                return <button key={key} type="button" onClick={() => togglePaymentFilter(key)} style={{
+                  border: '1px solid rgba(124,92,191,0.22)', borderRadius: 999, padding: '4px 9px',
+                  background: key === 'partial' ? 'rgba(224,160,20,0.10)' : 'rgba(220,70,60,0.08)',
+                  color: key === 'partial' ? '#9a6800' : '#b63a32', fontSize: 11,
+                  cursor: 'pointer', fontFamily: "'Sarabun',sans-serif"
+                }}>{label} ×</button>
+              })}
+            </div>
+          )}
         </div>
 
         {filteredTps.length === 0 ? (

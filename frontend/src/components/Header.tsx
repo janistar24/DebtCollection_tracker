@@ -5,7 +5,7 @@ import { CURRENT_YEAR } from '../data/mockData'
 const ROLE_LABEL: Record<string, string> = { officer: 'พนักงาน', director: 'ผู้บริหาร', admin: 'แอดมิน' }
 const PAGE_TITLES: Record<string, string> = {
   '/dashboard': 'หน้าหลัก',
-  '/taxpayers': 'ข้อมูลผู้เสียภาษีประจำปี',
+  '/taxpayers': 'รายละเอียดผู้ชำระภาษี (กค.)',
   '/taxpayers/new': 'เพิ่มผู้เสียภาษีรายใหม่',
   '/taxpayers/manage': 'จัดการผู้เสียภาษีทั้งหมด',
   '/payment-matching': 'ตรวจสอบการชำระ',

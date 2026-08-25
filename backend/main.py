@@ -1,4 +1,6 @@
 import subprocess
+import traceback
+from datetime import date
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -194,6 +196,54 @@ def get_payment_allocations():
             }
         )
 
+@app.get("/api/reports/monthly-payments")
+def get_monthly_payment_report(tax_year: int, group_code: str | None = None):
+    """สรุปยอดรับชำระจาก payment_date จริง แยกเดือนและประเภทภาษี"""
+    try:
+        data, columns = db.fetch(
+            """
+            SELECT
+                EXTRACT(MONTH FROM p.payment_date)::int AS payment_month,
+                COALESCE(SUM(pa.allocated_amount) FILTER (
+                    WHERE ta.tax_type = 'LAND_BUILDING'
+                ), 0) AS land_amount,
+                COALESCE(SUM(pa.allocated_amount) FILTER (
+                    WHERE ta.tax_type = 'SIGN'
+                ), 0) AS sign_amount,
+                COUNT(DISTINCT tyr.taxpayer_id) AS taxpayer_count
+            FROM public.payment_allocations pa
+            JOIN public.payments p
+                ON p.payment_id = pa.payment_id
+            JOIN public.tax_assessments ta
+                ON ta.assessment_id = pa.assessment_id
+            JOIN public.taxpayer_year_records tyr
+                ON tyr.year_record_id = ta.year_record_id
+            JOIN public.taxpayers t
+                ON t.taxpayer_id = tyr.taxpayer_id
+            WHERE tyr.tax_year = %s
+              AND (%s::text IS NULL OR t.group_code = %s::text)
+            GROUP BY EXTRACT(MONTH FROM p.payment_date)
+            ORDER BY payment_month
+            """,
+            (tax_year, group_code, group_code)
+        )
+        by_month = {row[0]: dict(zip(columns, row)) for row in data}
+        months = []
+        for month in range(1, 13):
+            item = by_month.get(month)
+            months.append({
+                "month": month,
+                "land_amount": float(item["land_amount"]) if item else 0,
+                "sign_amount": float(item["sign_amount"]) if item else 0,
+                "taxpayer_count": int(item["taxpayer_count"]) if item else 0,
+            })
+        return {"success": True, "data": months}
+    except Exception as error:
+        raise HTTPException(
+            status_code=500,
+            detail={"message": "ไม่สามารถสรุปยอดชำระรายเดือนได้", "error": str(error)}
+        )
+
 @app.post("/api/slips/read")
 async def read_payment_slip(request: Request):
     """OCR รูปสลิปแบบชั่วคราว: ไม่บันทึกรูปหรือข้อความ OCR ลงฐานข้อมูล"""
@@ -246,7 +296,7 @@ class PaymentAllocationInput(BaseModel):
 
 class CompletePaymentCreate(BaseModel):
     payment_amount: float
-    payment_date: str
+    payment_date: date
     payment_method: str
     reference_no: str | None = None
     receipt_no: str | None = None
@@ -267,8 +317,29 @@ def create_complete_payment(request: CompletePaymentCreate):
     if abs(allocated_total - request.payment_amount) > 0.009:
         raise HTTPException(status_code=400, detail="ผลรวมยอดจัดสรรต้องเท่ากับยอดชำระ")
 
+    assessment_ids = [item.assessment_id for item in request.allocations]
+    if len(assessment_ids) != len(set(assessment_ids)):
+        raise HTTPException(
+            status_code=400,
+            detail="รหัสการประเมินภาษีซ้ำกัน กรุณารีเฟรชข้อมูลแล้วเลือกประเภทภาษีใหม่"
+        )
+
+    stage = "ตรวจสอบข้อมูลก่อนบันทึก"
     try:
         with db.transaction() as cursor:
+            if request.recorded_by is not None:
+                stage = "ตรวจสอบผู้บันทึก"
+                cursor.execute(
+                    "SELECT user_id FROM public.users WHERE user_id = %s",
+                    (request.recorded_by,)
+                )
+                if cursor.fetchone() is None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"ไม่พบผู้ใช้งานรหัส {request.recorded_by} กรุณาออกจากระบบแล้วเข้าสู่ระบบใหม่"
+                    )
+
+            stage = "ตรวจสอบรายการประเมินภาษี"
             for item in request.allocations:
                 cursor.execute(
                     "SELECT assessment_id FROM public.tax_assessments WHERE assessment_id = %s",
@@ -280,6 +351,7 @@ def create_complete_payment(request: CompletePaymentCreate):
                         detail=f"ไม่พบข้อมูลการประเมินภาษีรหัส {item.assessment_id}"
                     )
 
+            stage = "บันทึกรายการรับชำระ"
             cursor.execute(
                 """
                 INSERT INTO public.payments (
@@ -297,6 +369,7 @@ def create_complete_payment(request: CompletePaymentCreate):
             )
             payment_id = cursor.fetchone()[0]
 
+            stage = "จัดสรรยอดตามประเภทภาษี"
             for item in request.allocations:
                 cursor.execute(
                     """
@@ -319,9 +392,14 @@ def create_complete_payment(request: CompletePaymentCreate):
     except HTTPException:
         raise
     except Exception as error:
+        print(f"[payments/complete] failed at: {stage}")
+        traceback.print_exc()
         raise HTTPException(
             status_code=500,
-            detail={"message": "บันทึกการชำระไม่สำเร็จ", "error": str(error)}
+            detail={
+                "message": f"บันทึกการชำระไม่สำเร็จในขั้นตอน: {stage}",
+                "error": str(error)
+            }
         )
 
 @app.post("/api/login")
@@ -608,6 +686,10 @@ class TaxpayerYearRecordCreate(BaseModel):
     note: str | None = None
     added_by: int | None = None
 
+class TaxpayerYearRecordUpdate(BaseModel):
+    note: str | None = None
+    is_included: bool = True
+
 @app.get("/api/taxpayer-year-records/by-taxpayer/{taxpayer_id}/{tax_year}")
 def get_taxpayer_year_record_by_taxpayer(taxpayer_id: int, tax_year: int):
     """อ่านข้อมูลเดิมได้แม้ record ถูกนำออกจากปีภาษีแล้ว"""
@@ -714,10 +796,48 @@ def create_taxpayer_year_record(
                 "message":
                     "ไม่สามารถเพิ่มผู้เสียภาษีเข้าปีภาษีได้",
                 "error":
-                    str(error)
+                str(error)
             }
         )
-    
+
+@app.put("/api/taxpayer-year-records/{year_record_id}")
+def update_taxpayer_year_record(
+    year_record_id: int,
+    request: TaxpayerYearRecordUpdate
+):
+    try:
+        result = taxpayer_year_records_service.update(
+            year_record_id=year_record_id,
+            note=request.note,
+            is_included=request.is_included
+        )
+
+        if result["Is Error"]:
+            raise HTTPException(
+                status_code=404,
+                detail=result["Error Message"]
+            )
+
+        return {
+            "success": True,
+            "message": "บันทึกหมายเหตุประจำปีเรียบร้อยแล้ว",
+            "data": {
+                "year_record_id": year_record_id,
+                "note": request.note,
+                "is_included": request.is_included
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": "ไม่สามารถบันทึกหมายเหตุประจำปีได้",
+                "error": str(error)
+            }
+        )
+
 # ลบผู้เสียภาษีออกจากปีภาษีนั้นๆ
 @app.put("/api/taxpayer-year-records/{year_record_id}/remove")
 def remove_taxpayer_from_year(year_record_id: int):

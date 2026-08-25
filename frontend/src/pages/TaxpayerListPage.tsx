@@ -110,6 +110,9 @@ export default function TaxpayerListPage() {
 
   const landTotal = filtered.reduce((s, tp) => s + (getAssessment(tp, selectedYear)?.landAmount ?? 0), 0)
   const signTotal = filtered.reduce((s, tp) => s + (getAssessment(tp, selectedYear)?.signAmount ?? 0), 0)
+  const tableGroupLabel = isDirector
+    ? (groupFilter === 'all' ? 'ทุกกลุ่ม' : groupFilter)
+    : (currentUser?.group ?? groupFilter)
 
   // Cell value with pending edit applied
   const cellVal = (tp: Taxpayer, type: 'land' | 'sign') => {
@@ -577,9 +580,9 @@ const handleInlineAdd = async () => {
   const hasPending = pendingCount > 0
 
   return (
-    <div style={{ padding: 24, maxWidth: 1400 }}>
+    <div className="annual-taxpayer-page" style={{ padding: 24, maxWidth: 1400 }}>
       {/* toolbar */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+      <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
         <input className="input-field" style={{ width: 240 }} placeholder="🔍 ค้นหาชื่อ, รหัส, เบอร์โทร"
           value={search} onChange={e => setSearch(e.target.value)} />
 
@@ -639,7 +642,7 @@ const handleInlineAdd = async () => {
       </div>
 
       {selectedYear < CURRENT_YEAR && (
-        <div style={{ marginBottom: 16, padding: '10px 16px', background: '#fff8e6', border: '1px solid rgba(230,160,0,0.25)', borderRadius: 12, fontSize: 13, color: '#8a5a00' }}>
+        <div className="no-print" style={{ marginBottom: 16, padding: '10px 16px', background: '#fff8e6', border: '1px solid rgba(230,160,0,0.25)', borderRadius: 12, fontSize: 13, color: '#8a5a00' }}>
           📁 ปี {selectedYear} เป็นข้อมูลในอดีต — <strong>ดูได้อย่างเดียว</strong>
         </div>
       )}
@@ -647,11 +650,11 @@ const handleInlineAdd = async () => {
       {/* Print-only document header */}
       <div className="print-only" style={{ marginBottom: 16, borderBottom: '2px solid #222', paddingBottom: 12 }}>
         <div style={{ textAlign: 'center', fontSize: 15, fontWeight: 700 }}>
-          รายละเอียดผู้ชำระภาษีที่ดินและสิ่งปลูกสร้าง - ภาษีป้าย
+          รายละเอียดผู้ชำระภาษี (กค.)
         </div>
 
         <div style={{ textAlign: 'center', fontSize: 13, marginTop: 4 }}>
-          ประจำปี {selectedYear} {groupFilter !== 'all' ? `อักษร ${groupFilter}` : '(ทุกกลุ่ม)'}
+          ประจำปี {selectedYear} {tableGroupLabel !== 'ทุกกลุ่ม' ? `อักษร ${tableGroupLabel}` : '(ทุกกลุ่ม)'}
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginTop: 8, color: '#555' }}>
@@ -660,15 +663,24 @@ const handleInlineAdd = async () => {
         </div>
       </div>
 
-      <div className="glass-card" style={{ padding: 0, overflow: 'visible' }}>
-        <div style={{ padding: '14px 18px', fontSize: 14, fontWeight: 700, color: '#5f4796', background: 'linear-gradient(90deg,rgba(240,236,251,.85),rgba(255,255,255,.7))', borderBottom: '1px solid rgba(200,190,240,.25)' }}>
-          รายละเอียดผู้ชำระภาษีที่ดินและสิ่งปลูกสร้าง-ภาษีป้าย_{selectedYear}_{groupFilter === 'all' ? 'ทุกกลุ่ม' : groupFilter}
+      <div className="glass-card annual-print-card" style={{ padding: 0, overflow: 'visible' }}>
+        <div className="annual-table-title" style={{ padding: '16px 18px', fontSize: 18, fontWeight: 700, color: '#5f4796', background: 'linear-gradient(90deg,rgba(240,236,251,.85),rgba(255,255,255,.7))', borderBottom: '1px solid rgba(200,190,240,.25)' }}>
+          รายละเอียดผู้ชำระภาษีที่ดินและสิ่งปลูกสร้าง-ภาษีป้าย_{selectedYear}_{tableGroupLabel}
         </div>
         {filtered.length === 0 && !editMode ? (
           <EmptyState icon="🔍" title="ไม่พบข้อมูล" sub="ลองเปลี่ยนเงื่อนไขการค้นหา" />
         ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <div className="annual-table-wrap" style={{ overflowX: 'auto' }}>
+            <table className="annual-taxpayer-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <colgroup>
+                <col className="col-number" />
+                <col className="col-code" />
+                <col className="col-name" />
+                <col span={6} className="col-tax" />
+                <col className="col-note" />
+                <col className="col-status" />
+                {editMode && <col className="col-action" />}
+              </colgroup>
               <thead>
                 <tr style={{ background: 'rgba(240,236,251,0.6)' }}>
                   <th style={TH}>#</th>
