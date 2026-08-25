@@ -420,12 +420,19 @@ export default function DashboardPage() {
       </div>
 
       {/* 2. Quick Menu — 3 items */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 24, maxWidth: 720 }}>
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+        gap: 16,
+        width: '100%',
+        marginBottom: 24,
+      }}>
         {quickMenuItems.map(a => (
           <button key={a.label} onClick={a.action} style={{
             background: 'rgba(255,255,255,0.72)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
             border: '1px solid rgba(200,190,240,0.35)', borderRadius: 16,
             padding: '14px 16px', cursor: 'pointer', textAlign: 'left',
+            width: '100%', minHeight: 112,
             boxShadow: '0 2px 12px rgba(124,92,191,0.06)', transition: 'all 0.18s',
             fontFamily: "'Sarabun', sans-serif",
           }}

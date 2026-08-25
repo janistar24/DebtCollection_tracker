@@ -7,7 +7,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/dashboard': 'หน้าหลัก',
   '/taxpayers': 'รายละเอียดผู้ชำระภาษี (กค.)',
   '/taxpayers/new': 'เพิ่มผู้เสียภาษีรายใหม่',
-  '/taxpayers/manage': 'จัดการผู้เสียภาษีทั้งหมด',
+  '/taxpayers/manage': 'ข้อมูลผู้เสียภาษีประจำปี',
   '/payment-matching': 'ตรวจสอบการชำระ',
   '/search-payment': 'ตรวจสอบและบันทึกการชำระ',
   '/reports': 'รายงาน',
