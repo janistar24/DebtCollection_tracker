@@ -7,6 +7,7 @@ export interface User {
   role: UserRole
   group?: string
   active: boolean
+  username?: string
 }
 
 export type TaxType = 'land' | 'sign' | 'both'
@@ -28,6 +29,7 @@ export interface TaxAssessment {
   signAmount: number
   prevLandAmount: number
   prevSignAmount: number
+  note?: string
 }
 
 export interface Payment {
@@ -41,6 +43,7 @@ export interface Payment {
   allocatedLand: number
   allocatedSign: number
   recordedBy: string
+  taxYear?: number
 }
 
 export interface FollowUp {
@@ -54,6 +57,7 @@ export interface FollowUp {
   promiseAmount?: number
   nextFollowDate?: string
   recordedBy: string
+  taxYear?: number
 }
 
 export interface Taxpayer {

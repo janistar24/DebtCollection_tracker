@@ -14,6 +14,22 @@ export interface TaxpayerYearRecordUpdate {
   is_included: boolean
 }
 
+export async function bulkSaveTaxpayerYearRecords(data: unknown) {
+  const response = await fetch(`${API_URL}/taxpayer-year-records/bulk-save`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  const result = await response.json()
+  if (!response.ok || !result.success) {
+    const message = typeof result.detail === 'string'
+      ? result.detail
+      : result.detail?.message ?? 'บันทึกข้อมูลรายปีไม่สำเร็จ'
+    throw new Error(result.detail?.error ? `${message}\nรายละเอียด: ${result.detail.error}` : message)
+  }
+  return result.data as any[]
+}
+
 export async function getTaxpayerYearRecord(
   taxpayerId: number,
   taxYear: number
@@ -21,50 +37,27 @@ export async function getTaxpayerYearRecord(
   const response = await fetch(
     `${API_URL}/taxpayer-year-records/by-taxpayer/${taxpayerId}/${taxYear}`
   )
-
   const result = await response.json()
 
   if (!response.ok || !result.success) {
     throw new Error(
-      typeof result.detail === 'string'
-        ? result.detail
-        : result.detail?.message ??
-          'โหลดข้อมูลปีภาษีเดิมไม่สำเร็จ'
+      result.detail?.message ?? 'โหลดข้อมูลปีภาษีเดิมไม่สำเร็จ'
     )
   }
 
-  if (!result.data) {
-    return null
-  }
+  if (!result.data) return null
 
   return {
-    yearRecordId:
-      String(result.data.year_record_id),
-
-    landAssessmentId:
-      Number(result.data.land_assessment_id) > 0
-        ? String(result.data.land_assessment_id)
-        : '',
-
-    signAssessmentId:
-      Number(result.data.sign_assessment_id) > 0
-        ? String(result.data.sign_assessment_id)
-        : '',
-
-    year:
-      taxYear,
-
-    landAmount:
-      Number(result.data.land_amount),
-
-    signAmount:
-      Number(result.data.sign_amount),
-
-    prevLandAmount:
-      Number(result.data.prev_land_amount),
-
-    prevSignAmount:
-      Number(result.data.prev_sign_amount)
+    yearRecordId: String(result.data.year_record_id),
+    landAssessmentId: result.data.land_assessment_id
+      ? String(result.data.land_assessment_id) : '',
+    signAssessmentId: result.data.sign_assessment_id
+      ? String(result.data.sign_assessment_id) : '',
+    year: taxYear,
+    landAmount: Number(result.data.land_amount),
+    signAmount: Number(result.data.sign_amount),
+    prevLandAmount: Number(result.data.prev_land_amount),
+    prevSignAmount: Number(result.data.prev_sign_amount)
   }
 }
 

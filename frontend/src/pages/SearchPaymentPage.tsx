@@ -14,12 +14,12 @@ import {
   getSignRemaining,
   getPaymentStatus,
   getLastFollowUp,
-  CURRENT_YEAR,
-  getUserById
+  CURRENT_YEAR
 } from '../data/mockData'
 import type { Taxpayer, Payment } from '../types'
 import PaymentForm from '../components/PaymentForm'
 import { readPaymentSlip } from '../api/slips'
+import { createCompletePayment } from '../api/payments'
 
 const CALL_RESULT_LABELS: Record<string, string> = {
   no_answer: 'ไม่รับสาย', reached: 'ติดต่อได้', callback: 'จะโทรกลับ',
@@ -40,8 +40,33 @@ interface Candidate {
   exact: boolean
 }
 
+type TaskSearchScope = 'all' | 'today' | 'previous'
+
+const TASK_SEARCH_OPTIONS: { value: TaskSearchScope; label: string }[] = [
+  { value: 'all', label: 'Task List ทั้งหมด' },
+  { value: 'today', label: 'ติดต่อวันนี้' },
+  { value: 'previous', label: 'งานค้างก่อนหน้า' },
+]
+
+const getLocalDateKey = (value: string | Date) => {
+  const date = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(date.getTime())) return typeof value === 'string' ? value.slice(0, 10) : ''
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+const isInTaskScope = (tp: Taxpayer, year: number, scope: TaskSearchScope) => {
+  const yearFollowUps = tp.followUps.filter(followUp => followUp.taxYear === year)
+  const isTask = tp.assessments.some(a => a.year === year)
+    && getPaymentStatus(tp, year) !== 'paid'
+    && yearFollowUps.length > 0
+  if (!isTask) return false
+
+  const contactedToday = yearFollowUps.some(fu => getLocalDateKey(fu.date) === getLocalDateKey(new Date()))
+  return scope === 'all' || (scope === 'today' && contactedToday) || (scope === 'previous' && !contactedToday)
+}
+
 export default function SearchPaymentPage() {
-  const { taxpayers, addPayment, currentUser, selectedYear } = useApp()
+  const { taxpayers, addPayment, currentUser, selectedYear, refreshData } = useApp()
   const [activeTab, setActiveTab] = useState<'search' | 'direct'>('search')
   const [amtInput, setAmtInput] = useState('')
   const [nameSearch, setNameSearch] = useState('')
@@ -49,7 +74,7 @@ export default function SearchPaymentPage() {
   const [groupFilter, setGroupFilter] = useState(
     currentUser?.role === 'officer' ? (currentUser.group ?? 'all') : 'all'
   )
-  const [personTypeFilter, setPersonTypeFilter] = useState('all')
+  const [taskSearchScope, setTaskSearchScope] = useState<TaskSearchScope>('all')
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [candidates, setCandidates] = useState<Candidate[]>([])
   const [searched, setSearched] = useState(false)
@@ -98,9 +123,7 @@ export default function SearchPaymentPage() {
     const pool = taxpayers.filter(tp => {
       if (!isDirector && tp.group !== currentUser?.group) return false
       if (groupFilter !== 'all' && tp.group !== groupFilter) return false
-      if (personTypeFilter === 'individual' && tp.type !== 'individual') return false
-      if (personTypeFilter === 'company' && tp.type !== 'company') return false
-      return getTotalRemaining(tp, selectedYear) > 0
+      return isInTaskScope(tp, selectedYear, taskSearchScope)
     })
 
   const results: Candidate[] = pool
@@ -304,27 +327,44 @@ export default function SearchPaymentPage() {
 
   const handleConfirm = async () => {
     if (!drawerTp) return
-    setSaving(true)
-    await new Promise(r => setTimeout(r, 600))
     const assess = drawerTp.assessments.find(a => a.year === selectedYear)
-    const alloc = toAllocate
-    const allocLand = Math.min(alloc, assess?.landAmount ?? 0)
-    const allocSign = Math.min(alloc - allocLand, assess?.signAmount ?? 0)
-    const pay: Payment = {
-      id: `pay${Date.now()}`, taxpayerId: drawerTp.id, amount: payAmt,
-      date: payDate, method: payMethod,
-      refNo: payMethod === 'transfer' ? payRef : undefined,
-      receiptNo: payMethod === 'cash' ? payReceipt : undefined,
-      allocatedLand: allocLand, allocatedSign: allocSign,
-      recordedBy: currentUser?.id ?? 'u1'
-    }
-    addPayment(pay)
-    setSaving(false); setSaved(true)
-    showSuccessToast()
-    setTimeout(() => {
-      setSaved(false); setShowPayModal(false); setDrawerTp(null)
-      setCandidates(prev => prev.filter(c => c.tp.id !== drawerTp.id))
-    }, 1400)
+    const allocLand = Math.min(toAllocate, getLandRemaining(drawerTp, selectedYear))
+    const allocSign = Math.min(toAllocate - allocLand, getSignRemaining(drawerTp, selectedYear))
+    const allocations = [
+      ...(allocLand > 0 && assess?.landAssessmentId ? [{ assessment_id: Number(assess.landAssessmentId), allocated_amount: allocLand }] : []),
+      ...(allocSign > 0 && assess?.signAssessmentId ? [{ assessment_id: Number(assess.signAssessmentId), allocated_amount: allocSign }] : []),
+    ]
+    if (toAllocate <= 0 || allocations.length === 0) return alert('ไม่พบรายการภาษีที่สามารถตัดยอดได้')
+    try {
+      setSaving(true)
+      const paymentId = await createCompletePayment({
+        payment_amount: toAllocate,
+        payment_date: payDate.slice(0, 10),
+        payment_datetime: new Date(`${payDate.slice(0, 10)}T${payTime || '00:00'}`).toISOString(),
+        payment_method: payMethod,
+        reference_no: payMethod === 'transfer' ? payRef || null : null,
+        receipt_no: payMethod === 'cash' ? payReceipt || null : null,
+        recorded_by: currentUser?.id ? Number(currentUser.id) : null,
+        allocations,
+      })
+      const pay: Payment = {
+        id: paymentId, taxpayerId: drawerTp.id, amount: toAllocate,
+        date: payDate, method: payMethod,
+        refNo: payMethod === 'transfer' ? payRef : undefined,
+        receiptNo: payMethod === 'cash' ? payReceipt : undefined,
+        allocatedLand: allocLand, allocatedSign: allocSign,
+        recordedBy: currentUser?.id ?? '', taxYear: selectedYear
+      }
+      addPayment(pay)
+      await refreshData()
+      setSaved(true); showSuccessToast()
+      setTimeout(() => {
+        setSaved(false); setShowPayModal(false); setDrawerTp(null)
+        setCandidates(prev => prev.filter(c => c.tp.id !== drawerTp.id))
+      }, 1400)
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'บันทึกการชำระไม่สำเร็จ')
+    } finally { setSaving(false) }
   }
 
   const showSuccessToast = () => {
@@ -334,7 +374,7 @@ export default function SearchPaymentPage() {
 
   const cashPool = taxpayers.filter(tp => {
     if (!isDirector && tp.group !== currentUser?.group) return false
-    return getTotalRemaining(tp, selectedYear) > 0
+    return isInTaskScope(tp, selectedYear, taskSearchScope)
   }).filter(tp => {
     if (!cashSearch) return false
     const s = cashSearch.toLowerCase()
@@ -343,21 +383,36 @@ export default function SearchPaymentPage() {
 
   const handleCashSave = async () => {
     if (!cashTp || !cashAmt) return
-    setCashSaving(true)
-    await new Promise(r => setTimeout(r, 500))
     const amt = parseFloat(cashAmt)
     const assess = cashTp.assessments.find(a => a.year === selectedYear)
-    const allocLand = Math.min(amt, assess?.landAmount ?? 0)
-    const allocSign = Math.min(amt - allocLand, assess?.signAmount ?? 0)
-    addPayment({
-      id: `pay${Date.now()}`, taxpayerId: cashTp.id, amount: amt,
-      date: cashDate, method: 'cash', receiptNo: cashReceipt || undefined,
-      allocatedLand: allocLand, allocatedSign: allocSign,
-      recordedBy: currentUser?.id ?? 'u1'
-    })
-    setCashSaving(false); setCashSaved(true)
-    showSuccessToast()
-    setTimeout(() => { setCashSaved(false); setShowCashModal(false); setCashTp(null); setCashSearch(''); setCashAmt('') }, 1400)
+    const remaining = getTotalRemaining(cashTp, selectedYear)
+    if (amt <= 0 || amt > remaining) return alert('ยอดชำระต้องมากกว่า 0 และไม่เกินยอดคงเหลือ')
+    const allocLand = Math.min(amt, getLandRemaining(cashTp, selectedYear))
+    const allocSign = Math.min(amt - allocLand, getSignRemaining(cashTp, selectedYear))
+    const allocations = [
+      ...(allocLand > 0 && assess?.landAssessmentId ? [{ assessment_id: Number(assess.landAssessmentId), allocated_amount: allocLand }] : []),
+      ...(allocSign > 0 && assess?.signAssessmentId ? [{ assessment_id: Number(assess.signAssessmentId), allocated_amount: allocSign }] : []),
+    ]
+    try {
+      setCashSaving(true)
+      const paymentId = await createCompletePayment({
+        payment_amount: amt, payment_date: cashDate.slice(0, 10),
+        payment_datetime: new Date(`${cashDate.slice(0, 10)}T${new Date().toTimeString().slice(0, 5)}`).toISOString(), payment_method: 'cash',
+        reference_no: null, receipt_no: cashReceipt || null,
+        recorded_by: currentUser?.id ? Number(currentUser.id) : null, allocations,
+      })
+      addPayment({
+        id: paymentId, taxpayerId: cashTp.id, amount: amt,
+        date: cashDate, method: 'cash', receiptNo: cashReceipt || undefined,
+        allocatedLand: allocLand, allocatedSign: allocSign,
+        recordedBy: currentUser?.id ?? '', taxYear: selectedYear
+      })
+      await refreshData()
+      setCashSaved(true); showSuccessToast()
+      setTimeout(() => { setCashSaved(false); setShowCashModal(false); setCashTp(null); setCashSearch(''); setCashAmt('') }, 1400)
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'บันทึกการชำระไม่สำเร็จ')
+    } finally { setCashSaving(false) }
   }
 
   return (
@@ -511,11 +566,16 @@ export default function SearchPaymentPage() {
               </div>
             )}
             <div>
-              <label style={LBL}>ประเภทบุคคล</label>
-              <select className="input-field" style={{ width: 160 }} value={personTypeFilter} onChange={e => setPersonTypeFilter(e.target.value)}>
-                <option value="all">ทุกประเภท</option>
-                <option value="individual">บุคคลธรรมดา</option>
-                <option value="company">นิติบุคคล / บริษัท</option>
+              <label style={LBL}>ค้นหาจากกลุ่มรายชื่อ</label>
+              <select className="input-field" style={{ width: 190 }} value={taskSearchScope} onChange={e => {
+                setTaskSearchScope(e.target.value as TaskSearchScope)
+                setCandidates([])
+                setSearched(false)
+                setDrawerTp(null)
+              }}>
+                {TASK_SEARCH_OPTIONS.map(option => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
               </select>
             </div>
           </div>
@@ -729,7 +789,7 @@ export default function SearchPaymentPage() {
             <>
               {/* Summary */}
               <div style={{ padding: '14px 16px', background: 'rgba(240,236,251,0.5)', borderRadius: 12, marginBottom: 14, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, fontSize: 13 }}>
-                <div><div style={SLIM}>ผู้เสียภาษี</div><div style={{ fontWeight: 700, color: '#2d2545' }}>{getTaxpayerName(drawerTp)}</div></div>
+                <div><div style={SLIM}>ผู้เสียภาษี</div><div style={{ fontWeight: 700, color: '#2d2545' }}>{getTaxpayerName(drawerTp!)}</div></div>
                 <div><div style={SLIM}>ปีภาษี</div><div style={{ fontWeight: 700, color: '#2d2545' }}>{selectedYear}</div></div>
                 <div style={{ gridColumn: '1/-1' }}><div style={SLIM}>ยอดที่ต้องชำระ</div><div style={{ fontSize: 18, fontWeight: 700, color: '#c0392b' }}>฿{formatCurrency(drawerRemaining)}</div></div>
               </div>
@@ -837,8 +897,8 @@ export default function SearchPaymentPage() {
               {false && cashTp && (
                 <>
                   <div style={{ padding: '10px 14px', background: 'rgba(240,236,251,0.5)', borderRadius: 10, marginBottom: 14 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: '#2d2545' }}>{getTaxpayerName(cashTp)}</div>
-                    <div style={{ fontSize: 12, color: '#a89cc8' }}>ยอดคงเหลือ: <strong style={{ color: '#c0392b' }}>฿{formatCurrency(getTotalRemaining(cashTp, selectedYear))}</strong></div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: '#2d2545' }}>{getTaxpayerName(cashTp!)}</div>
+                    <div style={{ fontSize: 12, color: '#a89cc8' }}>ยอดคงเหลือ: <strong style={{ color: '#c0392b' }}>฿{formatCurrency(getTotalRemaining(cashTp!, selectedYear))}</strong></div>
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
                     <div>
@@ -875,9 +935,9 @@ export default function SearchPaymentPage() {
 
 // ─── Tab 2: Direct Record Payment ─────────────────────────────────────────────
 function DirectPaymentTab() {
-  const { taxpayers, addPayment, currentUser, selectedYear } = useApp()
+  const { taxpayers, addPayment, currentUser, selectedYear, refreshData } = useApp()
   const [search, setSearch] = useState('')
-  const [personTypeFilter, setPersonTypeFilter] = useState('all')
+  const [taskSearchScope, setTaskSearchScope] = useState<TaskSearchScope>('all')
   const [selectedTp, setSelectedTp] = useState<Taxpayer | null>(null)
   const [taxType, setTaxType] = useState<'both' | 'land' | 'sign'>('both')
   const [amt, setAmt] = useState('')
@@ -901,12 +961,11 @@ function DirectPaymentTab() {
   const isDirector = currentUser?.role !== 'officer'
   const pool = taxpayers.filter(tp => {
     if (!isDirector && tp.group !== currentUser?.group) return false
-    if (personTypeFilter === 'individual' && tp.type !== 'individual') return false
-    if (personTypeFilter === 'company' && tp.type !== 'company') return false
+    if (!isInTaskScope(tp, selectedYear, taskSearchScope)) return false
     if (!search) return false
     const s = search.toLowerCase()
     return getTaxpayerName(tp).toLowerCase().includes(s) || tp.ownerCode.toLowerCase().includes(s) || tp.phone.includes(s)
-  }).filter(tp => getTotalRemaining(tp, selectedYear) > 0).slice(0, 8)
+  }).slice(0, 8)
 
   const pick = (tp: Taxpayer) => {
     setSelectedTp(tp)
@@ -923,22 +982,40 @@ function DirectPaymentTab() {
 
   const handleSave = async () => {
     if (!selectedTp || !payAmt) return
-    setSaving(true)
-    await new Promise(r => setTimeout(r, 500))
     const a = selectedTp.assessments.find(x => x.year === selectedYear)
-    const allocLand = Math.min(payAmt, a?.landAmount ?? 0)
-    const allocSign = Math.min(payAmt - allocLand, a?.signAmount ?? 0)
-    addPayment({
-      id: `pay${Date.now()}`, taxpayerId: selectedTp.id, amount: payAmt,
-      date: payDate, method,
-      refNo: method === 'transfer' ? refNo : undefined,
-      receiptNo: method !== 'transfer' ? receiptNo : undefined,
-      allocatedLand: allocLand, allocatedSign: allocSign,
-      recordedBy: currentUser?.id ?? 'u1'
-    })
-    setSaving(false); setSaved(true)
-    setToast(true)
-    setTimeout(() => { setToast(false); setSaved(false); setSelectedTp(null); setSearch(''); setAmt(''); setRefNo(''); setReceiptNo('') }, 2000)
+    if (payAmt > remaining) return alert('ยอดชำระเกินยอดคงเหลือ')
+    const landRemaining = getLandRemaining(selectedTp, selectedYear)
+    const signRemaining = getSignRemaining(selectedTp, selectedYear)
+    const allocLand = payTaxType === 'sign' ? 0 : Math.min(payAmt, landRemaining)
+    const allocSign = payTaxType === 'land' ? 0 : Math.min(payAmt - allocLand, signRemaining)
+    if (Math.abs(allocLand + allocSign - payAmt) > 0.009) return alert('ยอดที่กรอกไม่สอดคล้องกับประเภทภาษีและยอดคงเหลือ')
+    const allocations = [
+      ...(allocLand > 0 && a?.landAssessmentId ? [{ assessment_id: Number(a.landAssessmentId), allocated_amount: allocLand }] : []),
+      ...(allocSign > 0 && a?.signAssessmentId ? [{ assessment_id: Number(a.signAssessmentId), allocated_amount: allocSign }] : []),
+    ]
+    try {
+      setSaving(true)
+      const paymentId = await createCompletePayment({
+        payment_amount: payAmt, payment_date: payDate.slice(0, 10),
+        payment_datetime: new Date(`${payDate.slice(0, 10)}T${new Date().toTimeString().slice(0, 5)}`).toISOString(), payment_method: method,
+        reference_no: method === 'transfer' ? refNo || null : null,
+        receipt_no: method !== 'transfer' ? receiptNo || null : null,
+        recorded_by: currentUser?.id ? Number(currentUser.id) : null, allocations,
+      })
+      addPayment({
+        id: paymentId, taxpayerId: selectedTp.id, amount: payAmt,
+        date: payDate, method,
+        refNo: method === 'transfer' ? refNo : undefined,
+        receiptNo: method !== 'transfer' ? receiptNo : undefined,
+        allocatedLand: allocLand, allocatedSign: allocSign,
+        recordedBy: currentUser?.id ?? '', taxYear: selectedYear
+      })
+      await refreshData()
+      setSaved(true); setToast(true)
+      setTimeout(() => { setToast(false); setSaved(false); setSelectedTp(null); setSearch(''); setAmt(''); setRefNo(''); setReceiptNo('') }, 2000)
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'บันทึกการชำระไม่สำเร็จ')
+    } finally { setSaving(false) }
   }
 
   return (
@@ -956,17 +1033,17 @@ function DirectPaymentTab() {
       <div className="glass-card" style={{ padding: '24px 28px' }}>
         <div style={{ fontSize: 14, fontWeight: 700, color: '#2d2545', marginBottom: 18 }}>บันทึกการชำระ</div>
 
-        {/* Person type filter */}
+        {/* Task List source */}
         <div style={{ marginBottom: 16 }}>
-          <label style={LBL}>ประเภทบุคคล</label>
+          <label style={LBL}>ค้นหาจากกลุ่มรายชื่อ</label>
           <div style={{ display: 'flex', gap: 6 }}>
-            {[['all', 'ทุกประเภท'], ['individual', 'บุคคลธรรมดา'], ['company', 'นิติบุคคล']].map(([v, l]) => (
-              <button key={v} onClick={() => setPersonTypeFilter(v)} style={{
+            {TASK_SEARCH_OPTIONS.map(option => (
+              <button key={option.value} onClick={() => { setTaskSearchScope(option.value); setSelectedTp(null); setSearch('') }} style={{
                 padding: '6px 14px', borderRadius: 8, fontSize: 12, cursor: 'pointer',
-                border: personTypeFilter === v ? '1.5px solid #7c5cbf' : '1px solid rgba(180,165,230,0.3)',
-                background: personTypeFilter === v ? 'rgba(124,92,191,0.1)' : 'transparent',
-                color: personTypeFilter === v ? '#7c5cbf' : '#8873b5', fontFamily: "'Sarabun',sans-serif"
-              }}>{l}</button>
+                border: taskSearchScope === option.value ? '1.5px solid #7c5cbf' : '1px solid rgba(180,165,230,0.3)',
+                background: taskSearchScope === option.value ? 'rgba(124,92,191,0.1)' : 'transparent',
+                color: taskSearchScope === option.value ? '#7c5cbf' : '#8873b5', fontFamily: "'Sarabun',sans-serif"
+              }}>{option.label}</button>
             ))}
           </div>
         </div>
@@ -1002,8 +1079,8 @@ function DirectPaymentTab() {
             {/* Compact profile */}
             <div style={{ padding: '12px 14px', background: 'rgba(240,236,251,0.5)', borderRadius: 12, marginBottom: 18, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div>
-                <div style={{ fontWeight: 700, fontSize: 14, color: '#2d2545' }}>{getTaxpayerName(selectedTp)}</div>
-                <div style={{ fontSize: 11, color: '#a89cc8', fontFamily: 'monospace' }}>{selectedTp.ownerCode} · {selectedTp.phone}</div>
+                <div style={{ fontWeight: 700, fontSize: 14, color: '#2d2545' }}>{getTaxpayerName(selectedTp!)}</div>
+                <div style={{ fontSize: 11, color: '#a89cc8', fontFamily: 'monospace' }}>{selectedTp!.ownerCode} · {selectedTp!.phone}</div>
                 <div style={{ fontSize: 12, color: '#c0392b', fontWeight: 600, marginTop: 4 }}>ยอดคงเหลือ ฿{formatCurrency(remaining)} บาท</div>
               </div>
               <button onClick={() => { setSelectedTp(null); setSearch('') }} style={{ fontSize: 11, color: '#7c5cbf', background: 'none', border: '1px solid rgba(124,92,191,0.3)', borderRadius: 8, padding: '4px 8px', cursor: 'pointer', fontFamily: "'Sarabun',sans-serif" }}>เปลี่ยน</button>
@@ -1011,7 +1088,7 @@ function DirectPaymentTab() {
 
             {/* Tax type */}
             {(() => {
-              const a = selectedTp.assessments.find(x => x.year === selectedYear)
+              const a = selectedTp!.assessments.find(x => x.year === selectedYear)
               const hasLand = (a?.landAmount ?? 0) > 0
               const hasSign = (a?.signAmount ?? 0) > 0
               return hasLand && hasSign ? (

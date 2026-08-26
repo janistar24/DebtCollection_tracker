@@ -42,5 +42,43 @@ export async function getUsers(): Promise<User[]> {
     role: user.role.toLowerCase() as UserRole,
     group: user.group_code ?? undefined,
     active: user.is_active,
+    username: user.username,
   }))
+}
+
+export interface SaveUserInput {
+  employee_code: string
+  first_name: string
+  last_name: string
+  username: string
+  password?: string
+  role: string
+  group_code: string | null
+  is_active: boolean
+}
+
+async function userMutation(url: string, method: string, data?: unknown) {
+  const response = await fetch(url, {
+    method,
+    headers: data ? { 'Content-Type': 'application/json' } : undefined,
+    body: data ? JSON.stringify(data) : undefined,
+  })
+  const result = await response.json()
+  if (!response.ok || !result.success) {
+    throw new Error(typeof result.detail === 'string' ? result.detail : result.detail?.message ?? 'บันทึกผู้ใช้งานไม่สำเร็จ')
+  }
+  return result
+}
+
+export async function createUser(data: SaveUserInput): Promise<string> {
+  const result = await userMutation(`${API_URL}/users`, 'POST', data)
+  return String(result.data.user_id)
+}
+
+export async function updateUserRecord(userId: number, data: SaveUserInput) {
+  return userMutation(`${API_URL}/users/${userId}`, 'PUT', data)
+}
+
+export async function setUserActive(userId: number, active: boolean) {
+  return userMutation(`${API_URL}/users/${userId}/active?is_active=${active}`, 'PUT')
 }

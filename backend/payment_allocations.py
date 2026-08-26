@@ -70,9 +70,12 @@ class Payment_allocations:
 
                 p.payment_amount,
                 p.payment_date,
+                p.paid_at,
                 p.payment_method,
                 p.reference_no,
                 p.receipt_no
+                ,p.status
+                ,p.recorded_by
 
             FROM public.payment_allocations pa
 

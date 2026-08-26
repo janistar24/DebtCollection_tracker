@@ -41,53 +41,54 @@ export default function Sidebar({ collapsed, onToggle }: Props) {
 
   return (
     <aside className="glass-sidebar no-print" style={{
-      width: collapsed ? 64 : 240, minHeight: '100vh',
+      width: collapsed ? 64 : 240, height: '100vh', minHeight: '100vh', maxHeight: '100vh',
       display: 'flex', flexDirection: 'column',
-      transition: 'width 0.25s ease', overflow: 'hidden', flexShrink: 0, position: 'relative', zIndex: 10
+      transition: 'width 0.25s ease', overflow: 'hidden', flexShrink: 0,
+      position: 'sticky', top: 0, alignSelf: 'flex-start', zIndex: 10
     }}>
-      {/* Logo */}
-      <div
+    {/* Logo */}
+    <div
+      style={{
+        padding: collapsed ? '18px 0' : '18px 20px',
+        borderBottom: '1px solid rgba(200,190,240,0.2)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: collapsed ? 'center' : 'flex-start',
+        gap: 10,
+        minHeight: 64,
+      }}
+    >
+      <img
+        src={takhliLogo}
+        alt="โลโก้หน่วยงาน"
         style={{
-          padding: collapsed ? '18px 0' : '18px 20px',
-          borderBottom: '1px solid rgba(200,190,240,0.2)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: collapsed ? 'center' : 'flex-start',
-          gap: 10,
-          minHeight: 64,
+          width: 34,
+          height: 34,
+          borderRadius: 10,
+          objectFit: 'cover',
+          flexShrink: 0,
         }}
-      >
-        <img
-          src={takhliLogo}
-          alt="โลโก้หน่วยงาน"
-          style={{
-            width: 34,
-            height: 34,
-            borderRadius: 10,
-            objectFit: 'cover',
-            flexShrink: 0,
-          }}
-        />
+      />
 
-        {!collapsed && (
-          <div>
-            <div
-              style={{
-                fontSize: 12,
-                fontWeight: 700,
-                color: '#2d2545',
-                lineHeight: 1.2,
-              }}
-            >
-              ระบบบริหารภาษี
-            </div>
-
-            <div style={{ fontSize: 10, color: '#a89cc8' }}>
-              กองคลัง เทศบาลเมืองตาคลี
-            </div>
+      {!collapsed && (
+        <div>
+          <div
+            style={{
+              fontSize: 12,
+              fontWeight: 700,
+              color: '#2d2545',
+              lineHeight: 1.2,
+            }}
+          >
+            ระบบบริหารภาษี
           </div>
-        )}
-      </div>
+
+          <div style={{ fontSize: 10, color: '#a89cc8' }}>
+            ท้องถิ่น
+          </div>
+        </div>
+      )}
+    </div>
 
       {/* Toggle */}
       <button onClick={onToggle} style={{
@@ -98,7 +99,7 @@ export default function Sidebar({ collapsed, onToggle }: Props) {
       }}>{collapsed ? '›' : '‹'}</button>
 
       {/* Menu */}
-      <nav style={{ flex: 1, padding: '12px 8px', overflowY: 'auto', overflowX: 'hidden' }}>
+      <nav style={{ flex: 1, minHeight: 0, padding: '12px 8px', overflowY: 'auto', overflowX: 'hidden', overscrollBehavior: 'contain' }}>
         {menus.map(m => {
           const active = location.pathname === m.path ||
             (m.path !== '/dashboard' && m.path !== '/taxpayers' && m.path !== '/taxpayers/new' && location.pathname.startsWith(`${m.path}/`))
@@ -116,7 +117,7 @@ export default function Sidebar({ collapsed, onToggle }: Props) {
 
       {/* User info */}
       {currentUser && (
-        <div style={{ padding: collapsed ? '12px 8px' : '12px 16px', borderTop: '1px solid rgba(200,190,240,0.2)' }}>
+        <div style={{ flexShrink: 0, padding: collapsed ? '12px 8px' : '12px 16px', borderTop: '1px solid rgba(200,190,240,0.2)', background: 'rgba(255,255,255,0.72)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
           {!collapsed && (
             <div style={{ marginBottom: 8 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: '#2d2545', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{currentUser.name}</div>
@@ -124,7 +125,7 @@ export default function Sidebar({ collapsed, onToggle }: Props) {
             </div>
           )}
           <button onClick={logout} className="btn-ghost" style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: collapsed ? '8px 0' : '8px 10px', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span>🚪</span>{!collapsed && <span>ออกจากระบบ</span>}
+            {!collapsed && <span>ออกจากระบบ</span>}<span>➜]</span>
           </button>
         </div>
       )}

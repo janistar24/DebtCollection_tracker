@@ -1,6 +1,7 @@
+import json
 import subprocess
 import traceback
-from datetime import date
+from datetime import date, datetime
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -114,6 +115,151 @@ def get_users():
             status_code=500,
             detail={
                 "message": "ไม่สามารถดึงข้อมูลผู้ใช้งานได้",
+                "error": str(error)
+            }
+        )
+
+class AdminUserCreate(BaseModel):
+    employee_code: str
+    first_name: str
+    last_name: str
+    username: str
+    password: str
+    role: str
+    group_code: str | None = None
+    is_active: bool = True
+
+class AdminUserUpdate(BaseModel):
+    employee_code: str
+    first_name: str
+    last_name: str
+    username: str
+    password: str | None = None
+    role: str
+    group_code: str | None = None
+    is_active: bool = True
+
+def _save_user_assignment(cursor, user_id: int, role: str, group_code: str | None):
+    cursor.execute(
+        """UPDATE public.responsibility_assignments
+           SET is_active=FALSE,end_date=CURRENT_DATE
+           WHERE user_id=%s AND is_active=TRUE""",
+        (user_id,),
+    )
+    if role == "OFFICER" and group_code:
+        cursor.execute(
+            """SELECT user_id FROM public.responsibility_assignments
+               WHERE group_code=%s AND is_active=TRUE AND user_id<>%s""",
+            (group_code, user_id),
+        )
+        if cursor.fetchone():
+            raise HTTPException(
+                status_code=409,
+                detail=f"กลุ่ม {group_code} มีพนักงานผู้รับผิดชอบที่ใช้งานอยู่แล้ว",
+            )
+        cursor.execute(
+            """INSERT INTO public.responsibility_assignments
+               (user_id,group_code,start_date,is_active)
+               VALUES (%s,%s,CURRENT_DATE,TRUE)""",
+            (user_id, group_code),
+        )
+
+@app.post("/api/users")
+def create_admin_user(request: AdminUserCreate):
+    role = request.role.upper()
+    if role not in {"OFFICER", "DIRECTOR", "ADMIN"}:
+        raise HTTPException(status_code=400, detail="สิทธิ์ผู้ใช้งานไม่ถูกต้อง")
+    if role == "OFFICER" and not request.group_code:
+        raise HTTPException(status_code=400, detail="กรุณาเลือกกลุ่มรับผิดชอบ")
+    if len(request.password) < 6:
+        raise HTTPException(status_code=400, detail="รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร")
+    try:
+        with db.transaction() as cursor:
+            cursor.execute(
+                "SELECT user_id FROM public.users WHERE employee_code=%s OR username=%s",
+                (request.employee_code.strip(), request.username.strip()),
+            )
+            if cursor.fetchone():
+                raise HTTPException(status_code=409, detail="รหัสพนักงานหรือ Username ถูกใช้งานแล้ว")
+            cursor.execute(
+                """INSERT INTO public.users
+                   (employee_code,first_name,last_name,role,username,password_hash,is_active)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING user_id""",
+                (request.employee_code.strip(), request.first_name.strip(), request.last_name.strip(),
+                 role, request.username.strip(), password_hash.hash(request.password), request.is_active),
+            )
+            user_id = cursor.fetchone()[0]
+            _save_user_assignment(cursor, user_id, role, request.group_code)
+        return {"success": True, "data": {"user_id": user_id}}
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(status_code=500, detail={"message": "เพิ่มผู้ใช้งานไม่สำเร็จ", "error": str(error)})
+
+@app.put("/api/users/{user_id}")
+def update_admin_user(user_id: int, request: AdminUserUpdate):
+    role = request.role.upper()
+    if role not in {"OFFICER", "DIRECTOR", "ADMIN"}:
+        raise HTTPException(status_code=400, detail="สิทธิ์ผู้ใช้งานไม่ถูกต้อง")
+    if role == "OFFICER" and not request.group_code:
+        raise HTTPException(status_code=400, detail="กรุณาเลือกกลุ่มรับผิดชอบ")
+    if request.password and len(request.password) < 6:
+        raise HTTPException(status_code=400, detail="รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร")
+    try:
+        with db.transaction() as cursor:
+            cursor.execute("SELECT user_id FROM public.users WHERE user_id=%s", (user_id,))
+            if cursor.fetchone() is None:
+                raise HTTPException(status_code=404, detail="ไม่พบผู้ใช้งาน")
+            cursor.execute(
+                """SELECT user_id FROM public.users
+                   WHERE (employee_code=%s OR username=%s) AND user_id<>%s""",
+                (request.employee_code.strip(), request.username.strip(), user_id),
+            )
+            if cursor.fetchone():
+                raise HTTPException(status_code=409, detail="รหัสพนักงานหรือ Username ถูกใช้งานแล้ว")
+            if request.password:
+                cursor.execute(
+                    """UPDATE public.users SET employee_code=%s,first_name=%s,last_name=%s,
+                       role=%s,username=%s,password_hash=%s,is_active=%s,updated_at=CURRENT_TIMESTAMP
+                       WHERE user_id=%s""",
+                    (request.employee_code.strip(), request.first_name.strip(), request.last_name.strip(),
+                     role, request.username.strip(), password_hash.hash(request.password),
+                     request.is_active, user_id),
+                )
+            else:
+                cursor.execute(
+                    """UPDATE public.users SET employee_code=%s,first_name=%s,last_name=%s,
+                       role=%s,username=%s,is_active=%s,updated_at=CURRENT_TIMESTAMP
+                       WHERE user_id=%s""",
+                    (request.employee_code.strip(), request.first_name.strip(), request.last_name.strip(),
+                     role, request.username.strip(), request.is_active, user_id),
+                )
+            _save_user_assignment(cursor, user_id, role, request.group_code)
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(status_code=500, detail={"message": "แก้ไขผู้ใช้งานไม่สำเร็จ", "error": str(error)})
+
+@app.put("/api/users/{user_id}/active")
+def set_admin_user_active(user_id: int, is_active: bool):
+    try:
+        with db.transaction() as cursor:
+            cursor.execute(
+                "UPDATE public.users SET is_active=%s,updated_at=CURRENT_TIMESTAMP WHERE user_id=%s RETURNING user_id",
+                (is_active, user_id),
+            )
+            if cursor.fetchone() is None:
+                raise HTTPException(status_code=404, detail="ไม่พบผู้ใช้งาน")
+        return {"success": True}
+    except HTTPException:
+        raise
+
+    except Exception as error:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": "เปลี่ยนสถานะผู้ใช้งานไม่สำเร็จ",
                 "error": str(error)
             }
         )
@@ -285,6 +431,68 @@ def get_follow_up_logs():
             }
         )
 
+class FollowUpCreate(BaseModel):
+    taxpayer_id: int
+    tax_year: int
+    tax_scope: str = "BOTH"
+    contact_type: str
+    contacted_at: datetime
+    result: str
+    detail: str | None = None
+    promise_date: date | None = None
+    promise_amount: float | None = None
+    next_follow_date: date | None = None
+    recorded_by: int | None = None
+
+@app.post("/api/follow-up-logs")
+def create_follow_up_log(request: FollowUpCreate):
+    """บันทึกผลการติดต่อจริงและผูกกับผู้เสียภาษีในปีภาษีที่เลือก"""
+    scope_map = {"LAND": "LAND_BUILDING", "LAND_BUILDING": "LAND_BUILDING", "SIGN": "SIGN", "BOTH": "BOTH"}
+    contact_map = {"PHONE": "PHONE", "LINE": "LINE", "IN_PERSON": "OTHER", "LETTER": "OTHER", "OTHER": "OTHER"}
+    result_map = {"CALLBACK": "CALL_BACK", "CALL_BACK": "CALL_BACK"}
+    tax_scope = scope_map.get(request.tax_scope.upper())
+    contact_type = contact_map.get(request.contact_type.upper())
+    result = result_map.get(request.result.upper(), request.result.upper())
+    allowed_results = {"NO_ANSWER", "REACHED", "PROMISED", "CALL_BACK", "DISPUTE", "WRONG_NUMBER", "OTHER"}
+
+    if tax_scope is None:
+        raise HTTPException(status_code=400, detail="ประเภทภาษีที่ติดตามไม่ถูกต้อง")
+    if contact_type is None:
+        raise HTTPException(status_code=400, detail="ช่องทางการติดต่อไม่ถูกต้อง")
+    if result not in allowed_results:
+        raise HTTPException(status_code=400, detail="ผลการติดต่อไม่ถูกต้อง")
+    if request.promise_amount is not None and request.promise_amount < 0:
+        raise HTTPException(status_code=400, detail="ยอดนัดชำระต้องไม่ติดลบ")
+
+    try:
+        with db.transaction() as cursor:
+            cursor.execute(
+                """SELECT year_record_id
+                   FROM public.taxpayer_year_records
+                   WHERE taxpayer_id=%s AND tax_year=%s AND is_included=TRUE""",
+                (request.taxpayer_id, request.tax_year),
+            )
+            year_record = cursor.fetchone()
+            if year_record is None:
+                raise HTTPException(status_code=404, detail="ไม่พบผู้เสียภาษีในปีภาษีที่เลือก")
+
+            cursor.execute(
+                """INSERT INTO public.follow_up_logs
+                   (year_record_id,tax_scope,contact_type,contacted_at,result,detail,
+                    promise_date,promise_amount,next_follow_date,recorded_by)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   RETURNING follow_up_id""",
+                (year_record[0], tax_scope, contact_type, request.contacted_at, result,
+                 request.detail, request.promise_date, request.promise_amount,
+                 request.next_follow_date, request.recorded_by),
+            )
+            follow_up_id = cursor.fetchone()[0]
+        return {"success": True, "message": "บันทึกการติดต่อเรียบร้อยแล้ว", "data": {"follow_up_id": follow_up_id}}
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(status_code=500, detail={"message": "บันทึกการติดต่อไม่สำเร็จ", "error": str(error)})
+
 # Journey -------------------------------------------------------
 class LoginRequest(BaseModel):
     username: str
@@ -297,6 +505,8 @@ class PaymentAllocationInput(BaseModel):
 class CompletePaymentCreate(BaseModel):
     payment_amount: float
     payment_date: date
+    # รองรับหน้าที่ส่งเฉพาะวันที่ และใช้เวลาปัจจุบันเป็นค่าเริ่มต้น
+    payment_datetime: datetime | None = None
     payment_method: str
     reference_no: str | None = None
     receipt_no: str | None = None
@@ -340,29 +550,41 @@ def create_complete_payment(request: CompletePaymentCreate):
                     )
 
             stage = "ตรวจสอบรายการประเมินภาษี"
+            cursor.execute(
+                """SELECT ta.assessment_id,ta.year_record_id,ta.assessed_amount,
+                          COALESCE((SELECT SUM(pa.allocated_amount)
+                                    FROM public.payment_allocations pa
+                                    WHERE pa.assessment_id=ta.assessment_id),0) AS paid_amount
+                   FROM public.tax_assessments ta
+                   WHERE ta.assessment_id = ANY(%s)
+                   FOR UPDATE OF ta""",
+                (assessment_ids,),
+            )
+            assessment_rows = {row[0]: row for row in cursor.fetchall()}
+            missing = [item_id for item_id in assessment_ids if item_id not in assessment_rows]
+            if missing:
+                raise HTTPException(status_code=404, detail=f"ไม่พบข้อมูลการประเมินภาษีรหัส {missing[0]}")
+            if len({row[1] for row in assessment_rows.values()}) != 1:
+                raise HTTPException(status_code=400, detail="รายการภาษีที่จัดสรรต้องเป็นของผู้เสียภาษีรายเดียวกันและปีเดียวกัน")
             for item in request.allocations:
-                cursor.execute(
-                    "SELECT assessment_id FROM public.tax_assessments WHERE assessment_id = %s",
-                    (item.assessment_id,)
-                )
-                if cursor.fetchone() is None:
-                    raise HTTPException(
-                        status_code=404,
-                        detail=f"ไม่พบข้อมูลการประเมินภาษีรหัส {item.assessment_id}"
-                    )
+                row = assessment_rows[item.assessment_id]
+                remaining = float(row[2]) - float(row[3])
+                if item.allocated_amount - remaining > 0.009:
+                    raise HTTPException(status_code=400, detail=f"ยอดจัดสรรเกินยอดคงเหลือของการประเมินรหัส {item.assessment_id}")
 
             stage = "บันทึกรายการรับชำระ"
             cursor.execute(
                 """
                 INSERT INTO public.payments (
-                    payment_amount, payment_date, payment_method,
+                    payment_amount, payment_date, paid_at, payment_method,
                     reference_no, receipt_no, status, recorded_by
                 )
-                VALUES (%s, %s, %s, %s, %s, 'MATCHED', %s)
+                VALUES (%s, %s, %s, %s, %s, %s, 'MATCHED', %s)
                 RETURNING payment_id
                 """,
                 (
                     request.payment_amount, request.payment_date,
+                    request.payment_datetime or datetime.now().astimezone(),
                     request.payment_method.upper(), request.reference_no,
                     request.receipt_no, request.recorded_by
                 )
@@ -370,19 +592,13 @@ def create_complete_payment(request: CompletePaymentCreate):
             payment_id = cursor.fetchone()[0]
 
             stage = "จัดสรรยอดตามประเภทภาษี"
-            for item in request.allocations:
-                cursor.execute(
-                    """
-                    INSERT INTO public.payment_allocations (
-                        payment_id, assessment_id, allocated_amount, matched_by
-                    )
-                    VALUES (%s, %s, %s, %s)
-                    """,
-                    (
-                        payment_id, item.assessment_id,
-                        item.allocated_amount, request.recorded_by
-                    )
-                )
+            cursor.executemany(
+                """INSERT INTO public.payment_allocations
+                   (payment_id,assessment_id,allocated_amount,matched_by)
+                   VALUES (%s,%s,%s,%s)""",
+                [(payment_id, item.assessment_id, item.allocated_amount, request.recorded_by)
+                 for item in request.allocations],
+            )
 
         return {
             "success": True,
@@ -689,6 +905,145 @@ class TaxpayerYearRecordCreate(BaseModel):
 class TaxpayerYearRecordUpdate(BaseModel):
     note: str | None = None
     is_included: bool = True
+
+class AnnualBulkItem(BaseModel):
+    taxpayer_id: int
+    year_record_id: int | None = None
+    include: bool = True
+    note: str | None = None
+    land_amount: float | None = None
+    sign_amount: float | None = None
+    prev_land_amount: float = 0
+    prev_sign_amount: float = 0
+    land_reason: str | None = None
+    sign_reason: str | None = None
+
+class AnnualBulkSave(BaseModel):
+    tax_year: int
+    user_id: int | None = None
+    items: list[AnnualBulkItem]
+
+@app.post("/api/taxpayer-year-records/bulk-save")
+def bulk_save_taxpayer_year_records(request: AnnualBulkSave):
+    """บันทึกเพิ่ม/นำออก/ยอดประเมิน/หมายเหตุด้วย bulk upsert ชุดเดียว"""
+    if not request.items:
+        return {"success": True, "data": []}
+
+    payload = json.dumps(
+        [item.model_dump() for item in request.items],
+        ensure_ascii=False,
+    )
+    try:
+        with db.transaction() as cursor:
+            # ป้องกันคำขอเปิดปีเดียวกันพร้อมกัน แล้วส่งข้อมูลทั้งหมดให้ PostgreSQL
+            # จัดการใน statement เดียว เพื่อตัด network round-trip ต่อรายออก
+            cursor.execute("SELECT pg_advisory_xact_lock(%s)", (request.tax_year,))
+            cursor.execute(
+                """
+                WITH input_data AS (
+                    SELECT *
+                    FROM jsonb_to_recordset(%s::jsonb) AS item(
+                        taxpayer_id bigint,
+                        year_record_id bigint,
+                        include boolean,
+                        note text,
+                        land_amount numeric,
+                        sign_amount numeric,
+                        prev_land_amount numeric,
+                        prev_sign_amount numeric,
+                        land_reason text,
+                        sign_reason text
+                    )
+                ),
+                saved_years AS (
+                    INSERT INTO public.taxpayer_year_records
+                        (taxpayer_id, tax_year, note, is_included, added_by)
+                    SELECT taxpayer_id, %s, note, include, %s
+                    FROM input_data
+                    ON CONFLICT (taxpayer_id, tax_year) DO UPDATE SET
+                        note = CASE
+                            WHEN EXCLUDED.is_included THEN EXCLUDED.note
+                            ELSE taxpayer_year_records.note
+                        END,
+                        is_included = EXCLUDED.is_included,
+                        added_by = CASE
+                            WHEN EXCLUDED.is_included THEN EXCLUDED.added_by
+                            ELSE taxpayer_year_records.added_by
+                        END,
+                        updated_at = CURRENT_TIMESTAMP
+                    RETURNING year_record_id, taxpayer_id, is_included
+                ),
+                assessment_input AS (
+                    SELECT
+                        sy.year_record_id,
+                        i.taxpayer_id,
+                        values_to_save.tax_type,
+                        values_to_save.amount,
+                        values_to_save.previous_amount,
+                        values_to_save.reason
+                    FROM saved_years sy
+                    JOIN input_data i USING (taxpayer_id)
+                    CROSS JOIN LATERAL (
+                        VALUES
+                            ('LAND_BUILDING'::text, i.land_amount, i.prev_land_amount, i.land_reason),
+                            ('SIGN'::text, i.sign_amount, i.prev_sign_amount, i.sign_reason)
+                    ) AS values_to_save(tax_type, amount, previous_amount, reason)
+                    WHERE sy.is_included AND values_to_save.amount IS NOT NULL
+                ),
+                saved_assessments AS (
+                    INSERT INTO public.tax_assessments
+                        (year_record_id, tax_type, assessed_amount, previous_amount,
+                         change_reason, created_by)
+                    SELECT year_record_id, tax_type, amount, previous_amount, reason, %s
+                    FROM assessment_input
+                    ON CONFLICT (year_record_id, tax_type) DO UPDATE SET
+                        assessed_amount = EXCLUDED.assessed_amount,
+                        previous_amount = EXCLUDED.previous_amount,
+                        change_reason = EXCLUDED.change_reason,
+                        updated_by = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    RETURNING assessment_id, year_record_id, tax_type
+                ),
+                assessment_ids AS (
+                    SELECT
+                        year_record_id,
+                        jsonb_object_agg(tax_type, assessment_id) AS ids
+                    FROM saved_assessments
+                    GROUP BY year_record_id
+                )
+                SELECT
+                    sy.taxpayer_id,
+                    sy.is_included,
+                    sy.year_record_id,
+                    COALESCE(ai.ids, '{}'::jsonb) AS assessment_ids,
+                    i.land_amount,
+                    i.sign_amount,
+                    i.note
+                FROM saved_years sy
+                JOIN input_data i USING (taxpayer_id)
+                LEFT JOIN assessment_ids ai
+                    ON ai.year_record_id = sy.year_record_id
+                ORDER BY sy.taxpayer_id
+                """,
+                (payload, request.tax_year, request.user_id,
+                 request.user_id, request.user_id),
+            )
+            rows = cursor.fetchall()
+            results = [
+                {
+                    "taxpayer_id": row[0],
+                    "included": row[1],
+                    "year_record_id": row[2],
+                    "assessment_ids": row[3],
+                    "land_amount": float(row[4]) if row[4] is not None else None,
+                    "sign_amount": float(row[5]) if row[5] is not None else None,
+                    "note": row[6],
+                }
+                for row in rows
+            ]
+        return {"success": True, "data": results}
+    except Exception as error:
+        raise HTTPException(status_code=500, detail={"message": "บันทึกข้อมูลรายปีแบบชุดไม่สำเร็จ", "error": str(error)})
 
 @app.get("/api/taxpayer-year-records/by-taxpayer/{taxpayer_id}/{tax_year}")
 def get_taxpayer_year_record_by_taxpayer(taxpayer_id: int, tax_year: int):

@@ -9,15 +9,21 @@ import type { FollowUp as _FU } from '../types'
 import {
   getTotalAssessed, getTotalRemaining, getPaymentStatus,
   getFollowStatus, getLastFollowUp, formatCurrency, formatDate,
-  CURRENT_YEAR, getTaxpayerName, getUserById, getLandRemaining,
+  CURRENT_YEAR, getTaxpayerName, getLandRemaining,
   getSignRemaining, getAssessment
 } from '../data/mockData'
 import type { FollowUp } from '../types'
+import { createFollowUpLog } from '../api/follow_up_logs'
 
 const FOLLOW_FILTER_LABELS = [
-  { key: 'none', label: 'ยังไม่ได้ติดต่อ' },
   { key: 'followed', label: 'ติดต่อแล้ว' },
   { key: 'nocontact', label: 'ติดต่อไม่ได้' },
+] as const
+
+const TASK_SCOPE_LABELS = [
+  { key: 'all', label: 'ทั้งหมด' },
+  { key: 'today', label: 'ติดต่อวันนี้' },
+  { key: 'previous', label: 'งานค้างก่อนหน้า' },
 ] as const
 
 const PAYMENT_FILTER_LABELS = [
@@ -27,11 +33,12 @@ const PAYMENT_FILTER_LABELS = [
 
 type FollowFilterKey = typeof FOLLOW_FILTER_LABELS[number]['key']
 type PaymentFilterKey = typeof PAYMENT_FILTER_LABELS[number]['key']
+type TaskScopeKey = typeof TASK_SCOPE_LABELS[number]['key']
 
 const DONUT_COLORS = ['#7c5cbf', '#c4b5f0', '#f0a0a0']
 
 // ─── Call Log Modal ────────────────────────────────────────────────────────────
-function CallLogModal({ onClose, onSave }: { onClose: () => void; onSave: (fu: Omit<FollowUp, 'id'>) => void }) {
+function _LegacyCallLogModal({ onClose, onSave }: { onClose: () => void; onSave: (fu: Omit<FollowUp, 'id'>) => Promise<void> }) {
   const { taxpayers, currentUser, selectedYear } = useApp()
   const [step, setStep] = useState<1 | 2>(1)
   const [query, setQuery] = useState('')
@@ -82,8 +89,7 @@ function CallLogModal({ onClose, onSave }: { onClose: () => void; onSave: (fu: O
   const handleSave = async () => {
     if (!selected || !fuResult) return
     setSaving(true)
-    await new Promise(r => setTimeout(r, 500))
-    onSave({
+    await onSave({
       taxpayerId: selected.id, type: fuType, date: fuDate,
       result: fuResult as FollowUp['result'], detail: fuDetail,
       promiseDate: fuPromiseDate || undefined,
@@ -269,10 +275,371 @@ function CallLogModal({ onClose, onSave }: { onClose: () => void; onSave: (fu: O
   )
 }
 
+// ─── Contact Taxpayer Modal ──────────────────────────────────────────────────
+function CallLogModal({ onClose, onSave }: { onClose: () => void; onSave: (fu: Omit<FollowUp, 'id'>) => Promise<void> }) {
+  const { taxpayers, currentUser, selectedYear } = useApp()
+  const [query, setQuery] = useState('')
+  const [listFilter, setListFilter] = useState<'all' | 'never' | 'failed'>('all')
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [fuType, setFuType] = useState<'phone' | 'line' | 'other'>('phone')
+  const [fuDate, setFuDate] = useState(() => {
+    const now = new Date()
+    const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000)
+    return local.toISOString().slice(0, 16)
+  })
+  const [fuResult, setFuResult] = useState<FollowUp['result']>()
+  const [fuDetail, setFuDetail] = useState('')
+  const [fuPromiseDate, setFuPromiseDate] = useState('')
+  const [fuPromiseAmt, setFuPromiseAmt] = useState('')
+  const [fuNextDate, setFuNextDate] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  const isManager = currentUser?.role === 'director' || currentUser?.role === 'admin'
+  const yearFollowUps = (tp: typeof taxpayers[number]) =>
+    tp.followUps.filter(followUp => followUp.taxYear === selectedYear)
+
+  const contactCandidates = taxpayers
+    .filter(tp => isManager || tp.group === currentUser?.group)
+    .filter(tp => tp.assessments.some(a => a.year === selectedYear))
+    .filter(tp => getTotalRemaining(tp, selectedYear) > 0)
+    .sort((a, b) => {
+      const aNever = yearFollowUps(a).length === 0 ? 0 : 1
+      const bNever = yearFollowUps(b).length === 0 ? 0 : 1
+      if (aNever !== bNever) return aNever - bNever
+      return getTaxpayerName(a).localeCompare(getTaxpayerName(b), 'th')
+    })
+
+  const neverCount = contactCandidates.filter(tp => yearFollowUps(tp).length === 0).length
+  const failedCount = contactCandidates.filter(tp => yearFollowUps(tp).some(fu => fu.result === 'no_answer' || fu.result === 'wrong_number')).length
+
+  const visibleCandidates = contactCandidates.filter(tp => {
+    const keyword = query.trim().toLowerCase()
+    const matchesQuery = !keyword
+      || getTaxpayerName(tp).toLowerCase().includes(keyword)
+      || tp.ownerCode.toLowerCase().includes(keyword)
+      || tp.phone.includes(keyword)
+
+    if (!matchesQuery) return false
+    if (listFilter === 'never') return yearFollowUps(tp).length === 0
+    if (listFilter === 'failed') {
+      return yearFollowUps(tp).some(fu => fu.result === 'no_answer' || fu.result === 'wrong_number')
+    }
+    return true
+  })
+
+  const selected = contactCandidates.find(tp => tp.id === selectedId) ?? visibleCandidates[0] ?? null
+  const selectedAssessment = selected ? getAssessment(selected, selectedYear) : null
+  const landRemaining = selected ? getLandRemaining(selected, selectedYear) : 0
+  const signRemaining = selected ? getSignRemaining(selected, selectedYear) : 0
+  const selectedHistory = selected
+    ? [...yearFollowUps(selected)].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 4)
+    : []
+
+  const resultLabel: Record<string, string> = {
+    no_answer: 'ไม่รับสาย',
+    reached: 'ติดต่อสำเร็จ',
+    callback: 'ให้ติดต่อกลับ',
+    promised: 'นัดชำระ',
+    dispute: 'มีข้อโต้แย้ง',
+    wrong_number: 'เบอร์ไม่ถูกต้อง',
+    other: 'อื่น ๆ',
+  }
+
+  const formatFollowDateTime = (value: string) => {
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return value
+    return date.toLocaleString('th-TH', {
+      day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+    })
+  }
+
+  const failedAttempts = (tp: typeof contactCandidates[number]) =>
+    yearFollowUps(tp).filter(fu => fu.result === 'no_answer' || fu.result === 'wrong_number').length
+
+  const handleSave = async () => {
+    if (!selected || !fuResult) return
+    setSaving(true)
+    try {
+      await onSave({
+        taxpayerId: selected.id,
+        type: fuType,
+        date: fuDate,
+        result: fuResult,
+        detail: fuDetail.trim() || undefined,
+        promiseDate: fuPromiseDate || undefined,
+        promiseAmount: fuPromiseAmt ? Number(fuPromiseAmt) : undefined,
+        nextFollowDate: fuNextDate || undefined,
+        recordedBy: currentUser?.id ?? 'u1',
+      })
+      setSaved(true)
+      setTimeout(onClose, 900)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal title="📞 ติดต่อผู้เสียภาษี" onClose={onClose} maxWidth="920px">
+      {saved ? (
+        <div style={{ textAlign: 'center', padding: '52px 0' }}>
+          <div style={{ fontSize: 38, marginBottom: 10 }}>✅</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: '#1a8f5a' }}>บันทึกการติดต่อเรียบร้อยแล้ว</div>
+          <div style={{ fontSize: 12, color: '#9487b4', marginTop: 5 }}>Task List วันนี้ได้รับการอัปเดตแล้ว</div>
+        </div>
+      ) : (
+        <>
+          <div style={{
+            display: 'flex', justifyContent: 'flex-end', alignItems: 'center',
+            marginTop: -42, marginRight: 44, marginBottom: 18,
+          }}>
+            <div style={{
+              borderLeft: '1px solid rgba(180,165,210,0.45)', paddingLeft: 14,
+              fontSize: 11, color: '#9487b4', whiteSpace: 'nowrap',
+            }}>
+              ปีภาษี {selectedYear}{!isManager && ` · กลุ่ม ${currentUser?.group}`} · ผู้มียอดค้าง {contactCandidates.length} ราย
+            </div>
+          </div>
+
+          <div style={{
+            display: 'grid', gridTemplateColumns: '310px minmax(0, 1fr)',
+            border: '1px solid rgba(200,190,240,0.38)', borderRadius: 14,
+            overflow: 'hidden', minHeight: 500,
+          }}>
+            {/* รายชื่อผู้มียอดค้าง */}
+            <div style={{ borderRight: '1px solid rgba(200,190,240,0.32)', minWidth: 0 }}>
+              <div style={{ padding: 12, borderBottom: '1px solid rgba(200,190,240,0.26)' }}>
+                <input
+                  className="input-field"
+                  placeholder="ค้นหาชื่อ รหัส หรือเบอร์โทร"
+                  value={query}
+                  onChange={e => setQuery(e.target.value)}
+                  style={{ padding: '9px 11px', fontSize: 12 }}
+                />
+                <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                  {[
+                    ['all', `ทั้งหมด ${contactCandidates.length}`],
+                    ['never', `ยังไม่เคยติดต่อ ${neverCount}`],
+                    ['failed', `ติดต่อไม่ได้ ${failedCount}`],
+                  ].map(([key, label]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setListFilter(key as typeof listFilter)}
+                      style={{
+                        border: listFilter === key ? '1px solid #7c5cbf' : '1px solid rgba(180,165,230,0.38)',
+                        background: listFilter === key ? '#7c5cbf' : '#fff',
+                        color: listFilter === key ? '#fff' : '#5f527d',
+                        borderRadius: 8, padding: '5px 8px', cursor: 'pointer',
+                        fontFamily: "'Sarabun',sans-serif", fontSize: 11,
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ padding: 5 }}>
+                {visibleCandidates.length === 0 ? (
+                  <div style={{ textAlign: 'center', color: '#a89cc8', fontSize: 12, padding: '30px 10px' }}>ไม่พบรายชื่อ</div>
+                ) : visibleCandidates.map(tp => {
+                  const attempts = failedAttempts(tp)
+                  const isSelected = selected?.id === tp.id
+                  return (
+                    <button
+                      key={tp.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedId(tp.id)
+                        setFuResult(undefined)
+                        setFuDetail('')
+                        setFuPromiseDate('')
+                        setFuPromiseAmt('')
+                        setFuNextDate('')
+                      }}
+                      style={{
+                        width: '100%', display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto',
+                        gap: 7, padding: '10px 9px', border: 0, borderRadius: 10,
+                        background: isSelected ? 'rgba(124,92,191,0.11)' : 'transparent',
+                        color: '#2d2545', textAlign: 'left', cursor: 'pointer',
+                        fontFamily: "'Sarabun',sans-serif", marginBottom: 2,
+                      }}
+                    >
+                      <span style={{ minWidth: 0 }}>
+                        <strong style={{ display: 'block', fontSize: 13 }}>{getTaxpayerName(tp)}</strong>
+                        <small style={{ display: 'block', color: '#9487b4', marginTop: 3, fontSize: 11 }}>
+                          {tp.ownerCode} · {tp.phone || '-'}
+                        </small>
+                      </span>
+                      <span style={{
+                        height: 'fit-content', borderRadius: 99, padding: '4px 7px',
+                        background: attempts > 0 ? '#fff2e3' : '#f0ecf8',
+                        color: attempts > 0 ? '#a56519' : '#786b8f', fontSize: 10, whiteSpace: 'nowrap',
+                      }}>
+                        {attempts > 0 ? `ติดต่อไม่ได้ ${attempts} ครั้ง` : 'ยังไม่เคยติดต่อ'}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* รายละเอียดและฟอร์ม */}
+            <div style={{ padding: '15px 17px', minWidth: 0 }}>
+              {!selected ? (
+                <div style={{ textAlign: 'center', color: '#a89cc8', padding: '100px 0', fontSize: 13 }}>เลือกรายชื่อเพื่อบันทึกการติดต่อ</div>
+              ) : (
+                <>
+                  <div style={{
+                    display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12,
+                    paddingBottom: 12, borderBottom: '1px solid rgba(200,190,240,0.3)',
+                  }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: '#2d2545' }}>{getTaxpayerName(selected)}</div>
+                      <div style={{ fontSize: 11, color: '#9487b4', marginTop: 2 }}>{selected.ownerCode} · {selected.phone || '-'}</div>
+                      {selected.notes?.trim() && (
+                        <div style={{
+                          display: 'inline-block', maxWidth: '100%', marginTop: 7,
+                          padding: '4px 8px', borderRadius: 7,
+                          background: '#fff3d9', color: '#8a5a00', fontSize: 11,
+                        }}>
+                          📝 {selected.notes}
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 7 }}>
+                        {(selectedAssessment?.landAmount ?? 0) > 0 && (
+                          <span style={{ background: '#f0ecfb', color: '#5f4399', borderRadius: 7, padding: '4px 7px', fontSize: 11 }}>
+                            🏠 ภาษีที่ดินฯ ฿{formatCurrency(landRemaining)}
+                          </span>
+                        )}
+                        {(selectedAssessment?.signAmount ?? 0) > 0 && (
+                          <span style={{ background: '#f0ecfb', color: '#5f4399', borderRadius: 7, padding: '4px 7px', fontSize: 11 }}>
+                            🪧 ภาษีป้าย ฿{formatCurrency(signRemaining)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                      <div style={{ fontSize: 11, color: '#a89cc8' }}>ยอดคงเหลือ</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: '#c0392b' }}>฿{formatCurrency(getTotalRemaining(selected, selectedYear))}</div>
+                    </div>
+                  </div>
+
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#2d2545', margin: '12px 0 7px' }}>ประวัติการติดต่อ</div>
+                  {selectedHistory.length === 0 ? (
+                    <div style={{ color: '#a89cc8', fontSize: 11, padding: '5px 0 9px' }}>ยังไม่มีประวัติการติดต่อ</div>
+                  ) : (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0,1fr))', gap: 8 }}>
+                      {selectedHistory.map(fu => (
+                        <div key={fu.id} style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+                          background: '#f6f3fa', borderRadius: 9, padding: '10px 11px', minWidth: 0,
+                        }}>
+                          <span style={{ color: '#655a71', fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap' }}>
+                            {resultLabel[fu.result ?? 'other']}
+                          </span>
+                          <span style={{ color: '#9487a5', fontSize: 11, whiteSpace: 'nowrap' }}>
+                            {formatFollowDateTime(fu.date)} ⓘ
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#2d2545', margin: '13px 0 8px' }}>บันทึกการโทร</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 9 }}>
+                    <label style={{ fontSize: 11, color: '#6b5b95' }}>
+                      วันที่และเวลา
+                      <input className="input-field" type="datetime-local" value={fuDate} onChange={e => setFuDate(e.target.value)} style={{ marginTop: 5, padding: '8px 9px', fontSize: 12 }} />
+                    </label>
+                    <label style={{ fontSize: 11, color: '#6b5b95' }}>
+                      ช่องทาง
+                      <select className="input-field" value={fuType} onChange={e => setFuType(e.target.value as typeof fuType)} style={{ marginTop: 5, padding: '8px 9px', fontSize: 12 }}>
+                        <option value="phone">โทรศัพท์</option>
+                        <option value="line">LINE</option>
+                        <option value="other">อื่น ๆ</option>
+                      </select>
+                    </label>
+
+                    <div style={{ gridColumn: '1 / -1' }}>
+                      <div style={{ fontSize: 11, color: '#6b5b95', marginBottom: 5 }}>ผลการติดต่อ *</div>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        {[
+                          ['reached', 'ติดต่อสำเร็จ'],
+                          ['no_answer', 'ไม่รับสาย'],
+                          ['callback', 'ให้ติดต่อกลับ'],
+                          ['promised', 'นัดชำระ'],
+                          ['wrong_number', 'เบอร์ไม่ถูกต้อง'],
+                        ].map(([value, label]) => (
+                          <button
+                            key={value}
+                            type="button"
+                            onClick={() => setFuResult(value as FollowUp['result'])}
+                            style={{
+                              border: fuResult === value ? '1px solid #7c5cbf' : '1px solid rgba(180,165,230,0.4)',
+                              background: fuResult === value ? '#7c5cbf' : '#fff',
+                              color: fuResult === value ? '#fff' : '#55486f',
+                              borderRadius: 8, padding: '6px 9px', cursor: 'pointer',
+                              fontFamily: "'Sarabun',sans-serif", fontSize: 11,
+                            }}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {fuResult === 'promised' && (
+                      <>
+                        <label style={{ fontSize: 11, color: '#6b5b95' }}>
+                          วันที่นัดชำระ
+                          <input className="input-field" type="date" value={fuPromiseDate} onChange={e => setFuPromiseDate(e.target.value)} style={{ marginTop: 5, padding: '8px 9px', fontSize: 12 }} />
+                        </label>
+                        <label style={{ fontSize: 11, color: '#6b5b95' }}>
+                          ยอดที่นัดชำระ
+                          <input className="input-field" type="number" min="0" value={fuPromiseAmt} onChange={e => setFuPromiseAmt(e.target.value)} placeholder="0.00" style={{ marginTop: 5, padding: '8px 9px', fontSize: 12 }} />
+                        </label>
+                      </>
+                    )}
+
+                    <label style={{ gridColumn: '1 / -1', fontSize: 11, color: '#6b5b95' }}>
+                      รายละเอียด
+                      <textarea className="input-field" rows={2} value={fuDetail} onChange={e => setFuDetail(e.target.value)} placeholder="บันทึกรายละเอียดสั้น ๆ" style={{ marginTop: 5, resize: 'vertical', minHeight: 58, fontSize: 12 }} />
+                    </label>
+
+                    {(fuResult === 'no_answer' || fuResult === 'callback') && (
+                      <label style={{ gridColumn: '1 / -1', fontSize: 11, color: '#6b5b95' }}>
+                        วันที่ติดตามครั้งถัดไป
+                        <input className="input-field" type="date" value={fuNextDate} onChange={e => setFuNextDate(e.target.value)} style={{ marginTop: 5, padding: '8px 9px', fontSize: 12 }} />
+                      </label>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
+                    <button className="btn-secondary" type="button" onClick={onClose}>ยกเลิก</button>
+                    <button className="btn-primary" type="button" onClick={handleSave} disabled={!fuResult || saving}>
+                      {saving ? 'กำลังบันทึก...' : 'บันทึกการติดต่อ'}
+                    </button>
+                  </div>
+                  <div style={{ textAlign: 'right', fontSize: 10, color: '#a89cc8', marginTop: 7 }}>
+                    หากติดต่อไม่ได้ รายชื่อจะยังอยู่สำหรับการติดต่อครั้งถัดไป
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+    </Modal>
+  )
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function DashboardPage() {
-  const { currentUser, taxpayers, selectedYear, addFollowUp } = useApp()
+  const { currentUser, users, taxpayers, selectedYear, addFollowUp } = useApp()
   const navigate = useNavigate()
+  const [taskScope, setTaskScope] = useState<TaskScopeKey>('all')
   const [followFilters, setFollowFilters] = useState<FollowFilterKey[]>([])
   const [paymentFilters, setPaymentFilters] = useState<PaymentFilterKey[]>([])
   const [showTaskFilters, setShowTaskFilters] = useState(false)
@@ -308,23 +675,23 @@ export default function DashboardPage() {
     { name: 'ยังไม่ชำระ', value: unpaidCount, pct: totalCount > 0 ? Math.round(unpaidCount / totalCount * 100) : 0 },
   ]
 
-  const noneCount = myTaxpayers.filter(tp => getFollowStatus(tp) === 'none' && getPaymentStatus(tp, selectedYear) !== 'paid').length
-  const promisedCount = myTaxpayers.filter(tp => getFollowStatus(tp) === 'promised').length
+  const noneCount = myTaxpayers.filter(tp => getFollowStatus(tp, selectedYear) === 'none' && getPaymentStatus(tp, selectedYear) !== 'paid').length
+  const promisedCount = myTaxpayers.filter(tp => getFollowStatus(tp, selectedYear) === 'promised').length
 
   // Director group stats
   const groups = ['ก-น', 'บ-ล', 'ส-ศ', 'ว-ฮ และบริษัท'] as const
   const groupStats = groups.map(g => {
     const tps = taxpayers.filter(tp => tp.group === g && !!tp.assessments.find(a => a.year === selectedYear))
-    const officer = tps[0] ? getUserById(tps[0].responsibleOfficer) : undefined
+    const officer = tps[0] ? users.find(user => user.id === tps[0].responsibleOfficer) : undefined
     const totalRem = tps.reduce((s, tp) => s + getTotalRemaining(tp, selectedYear), 0)
     const totalAss = tps.reduce((s, tp) => s + getTotalAssessed(tp, selectedYear), 0)
     const totalPaidG = totalAss - totalRem
     const paidG = tps.filter(tp => getPaymentStatus(tp, selectedYear) === 'paid').length
     const unpaidG = tps.filter(tp => getPaymentStatus(tp, selectedYear) !== 'paid').length
-    const noFollow = tps.filter(tp => getFollowStatus(tp) === 'none' && getPaymentStatus(tp, selectedYear) !== 'paid').length
+    const noFollow = tps.filter(tp => getFollowStatus(tp, selectedYear) === 'none' && getPaymentStatus(tp, selectedYear) !== 'paid').length
     const contacted = unpaidG - noFollow
     const overdue = tps.filter(tp => {
-      const lastFu = getLastFollowUp(tp)
+      const lastFu = getLastFollowUp(tp, selectedYear)
       return lastFu?.promiseDate && lastFu.promiseDate < new Date().toISOString().slice(0, 10) && getPaymentStatus(tp, selectedYear) !== 'paid'
     }).length
     const pctG = totalAss > 0 ? Math.round(totalPaidG / totalAss * 100) : 0
@@ -342,25 +709,72 @@ export default function DashboardPage() {
     .sort((a, b) => b.urgency - a.urgency)
     .slice(0, 5)
 
-  const filteredTps = myTaxpayers.filter(tp => {
-    const payStat = getPaymentStatus(tp, selectedYear)
-    const followStat = getFollowStatus(tp)
+  const getLocalDateKey = (value: string | Date) => {
+    const date = value instanceof Date ? value : new Date(value)
+    if (Number.isNaN(date.getTime())) return typeof value === 'string' ? value.slice(0, 10) : ''
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }
 
-    // ตารางงานวันนี้ไม่แสดงผู้ที่ชำระครบแล้ว
-    if (payStat === 'paid') return false
+  const todayKey = getLocalDateKey(new Date())
+  const followUpsForYear = (tp: typeof taxpayers[number]) =>
+    tp.followUps.filter(followUp => followUp.taxYear === selectedYear)
+
+  // Task List มีเฉพาะผู้ที่เคยถูกติดต่อแล้วและยังมียอดค้าง
+  // แบ่งเป็น: ติดต่อวันนี้ และงานจากวันก่อนที่ยังปิดยอดไม่ได้
+  const taskTaxpayers = myTaxpayers.filter(tp => {
+    const payStat = getPaymentStatus(tp, selectedYear)
+    const hasSelectedYear = tp.assessments.some(a => a.year === selectedYear)
+    return hasSelectedYear && payStat !== 'paid' && followUpsForYear(tp).length > 0
+  })
+
+  const contactedTodayCount = taskTaxpayers.filter(tp =>
+    followUpsForYear(tp).some(fu => getLocalDateKey(fu.date) === todayKey)
+  ).length
+
+  // สรุปผลงานวันนี้จากข้อมูลจริงของผู้เสียภาษีที่ผู้ใช้มีสิทธิ์เห็น
+  const successfulContactResults = new Set(['reached', 'promised', 'callback'])
+  const successfulContactTodayCount = myTaxpayers.filter(tp =>
+    followUpsForYear(tp).some(fu =>
+      getLocalDateKey(fu.date) === todayKey
+      && !!fu.result
+      && successfulContactResults.has(fu.result)
+    )
+  ).length
+
+  const paymentsToday = myTaxpayers.flatMap(tp =>
+    tp.assessments.some(a => a.year === selectedYear)
+      ? tp.payments.filter(payment => getLocalDateKey(payment.date) === todayKey)
+      : []
+  )
+  const paidTodayCount = new Set(paymentsToday.map(payment => payment.taxpayerId)).size
+  const receivedTodayAmount = paymentsToday.reduce((sum, payment) => sum + Number(payment.amount || 0), 0)
+
+  const previousPendingCount = taskTaxpayers.length - contactedTodayCount
+
+  const filteredTps = taskTaxpayers.filter(tp => {
+    const payStat = getPaymentStatus(tp, selectedYear)
+    const lastFu = getLastFollowUp(tp, selectedYear)
+    const contactedToday = followUpsForYear(tp).some(fu => getLocalDateKey(fu.date) === todayKey)
+
+    const matchesScope = taskScope === 'all'
+      || (taskScope === 'today' && contactedToday)
+      || (taskScope === 'previous' && !contactedToday)
 
     const matchesPayment = paymentFilters.length === 0
       || paymentFilters.includes(payStat as PaymentFilterKey)
 
     const matchesFollow = followFilters.length === 0
       || followFilters.some(filter => {
-        if (filter === 'none') return followStat === 'none'
-        if (filter === 'followed') return followStat === 'followed' || followStat === 'promised'
-        if (filter === 'nocontact') return followStat === 'dispute'
+        const result = lastFu?.result
+        if (filter === 'followed') return result === 'reached' || result === 'promised' || result === 'callback'
+        if (filter === 'nocontact') return result === 'no_answer' || result === 'wrong_number'
         return false
       })
 
-    return matchesPayment && matchesFollow
+    return matchesScope && matchesPayment && matchesFollow
   }).slice(0, 50)
 
   const toggleFollowFilter = (key: FollowFilterKey) => {
@@ -377,17 +791,60 @@ export default function DashboardPage() {
 
   const activeTaskFilterCount = followFilters.length + paymentFilters.length
 
-  const handleCallLogSave = (fu: Omit<FollowUp, 'id'>) => {
-    addFollowUp({ ...fu, id: `fu${Date.now()}` })
-    setCallLogToast(true)
-    setTimeout(() => setCallLogToast(false), 3000)
+  const handleCallLogSave = async (fu: Omit<FollowUp, 'id'>) => {
+    try {
+      const id = await createFollowUpLog({
+        taxpayer_id: Number(fu.taxpayerId),
+        tax_year: selectedYear,
+        tax_scope: 'BOTH',
+        contact_type: fu.type,
+        contacted_at: fu.date,
+        result: fu.result ?? 'other',
+        detail: fu.detail ?? null,
+        promise_date: fu.promiseDate ?? null,
+        promise_amount: fu.promiseAmount ?? null,
+        next_follow_date: fu.nextFollowDate ?? null,
+        recorded_by: currentUser?.id ? Number(currentUser.id) : null,
+      })
+      addFollowUp({ ...fu, id, taxYear: selectedYear })
+      setCallLogToast(true)
+      setTimeout(() => setCallLogToast(false), 3000)
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'บันทึกการติดต่อไม่สำเร็จ')
+      throw error
+    }
   }
 
-  // Quick Menu — 3 items, visible to all roles
+  // Quick Menu — เรียงตาม Flow ทวงหนี้
   const quickMenuItems = [
-    { icon: '📞', label: 'บันทึกการติดตามการชำระภาษี', sub: 'บันทึกผลการโทรติดตาม', color: '#7c5cbf', action: () => setShowCallLog(true) },
-    { icon: '💳', label: 'ตรวจสอบและบันทึกการชำระ', sub: 'ค้นหายอดหรือบันทึกชำระ', color: '#3a5fbf', action: () => navigate('/search-payment') },
-    { icon: '📊', label: 'ดูรายงานวันนี้', sub: 'รายงานสรุปประจำวัน', color: '#1a8f5a', action: () => navigate('/reports') },
+    {
+      step: '①',
+      icon: '📞',
+      label: 'ติดต่อผู้เสียภาษี',
+      sub: 'เลือกผู้เสียภาษีและบันทึกผลการติดต่อ',
+      action: () => setShowCallLog(true),
+    },
+    {
+      step: '②',
+      icon: '📋',
+      label: 'ดู Task List วันนี้',
+      sub: `${taskTaxpayers.length} รายการที่ต้องติดตามและดำเนินการต่อ`,
+      action: () => document.getElementById('daily-task-list')?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+    },
+    {
+      step: '③',
+      icon: '💳',
+      label: 'ตรวจสอบยอดเงินเข้า',
+      sub: 'ค้นหาเจ้าของยอดและบันทึกการชำระ',
+      action: () => navigate('/search-payment'),
+    },
+    {
+      step: '④',
+      icon: '📊',
+      label: 'ดูรายงานวันนี้',
+      sub: 'ตรวจสอบผลการติดตามและยอดรับชำระ',
+      action: () => navigate('/reports'),
+    },
   ]
 
   return (
@@ -419,30 +876,85 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* 2. Quick Menu — 3 items */}
+      {/* 2. Quick Menu — Flow ทวงหนี้ 4 ขั้นตอน */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-        gap: 16,
+        gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
+        gap: 12,
         width: '100%',
         marginBottom: 24,
       }}>
         {quickMenuItems.map(a => (
           <button key={a.label} onClick={a.action} style={{
-            background: 'rgba(255,255,255,0.72)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
-            border: '1px solid rgba(200,190,240,0.35)', borderRadius: 16,
-            padding: '14px 16px', cursor: 'pointer', textAlign: 'left',
-            width: '100%', minHeight: 112,
-            boxShadow: '0 2px 12px rgba(124,92,191,0.06)', transition: 'all 0.18s',
+            background: 'linear-gradient(135deg, #7654c2 0%, #8262ca 100%)',
+            border: '1px solid rgba(112,78,190,0.72)', borderRadius: 16,
+            padding: '18px 20px', cursor: 'pointer', textAlign: 'left',
+            width: '100%', minHeight: 138, height: '100%',
+            boxShadow: '0 5px 16px rgba(104,72,180,0.18)', transition: 'all 0.18s',
             fontFamily: "'Sarabun', sans-serif",
           }}
-            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)'; (e.currentTarget as HTMLElement).style.boxShadow = '0 6px 20px rgba(124,92,191,0.14)' }}
-            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.transform = ''; (e.currentTarget as HTMLElement).style.boxShadow = '0 2px 12px rgba(124,92,191,0.06)' }}
+            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)'; (e.currentTarget as HTMLElement).style.boxShadow = '0 9px 24px rgba(104,72,180,0.28)' }}
+            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.transform = ''; (e.currentTarget as HTMLElement).style.boxShadow = '0 5px 16px rgba(104,72,180,0.18)' }}
           >
-            <div style={{ fontSize: 22, marginBottom: 6 }}>{a.icon}</div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#2d2545', marginBottom: 2 }}>{a.label}</div>
-            <div style={{ fontSize: 11, color: '#a89cc8' }}>{a.sub}</div>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              marginBottom: 12, color: '#ffffff',
+            }}>
+              <span style={{ fontSize: 20, lineHeight: 1 }}>{a.step}</span>
+              <span style={{ fontSize: 20, lineHeight: 1 }}>{a.icon}</span>
+            </div>
+
+            <div style={{
+              fontSize: 14, fontWeight: 700, color: '#ffffff',
+              marginBottom: 4, lineHeight: 1.35,
+            }}>
+              {a.label}
+            </div>
+            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.76)', lineHeight: 1.45 }}>
+              {a.sub}
+            </div>
+
           </button>
+        ))}
+      </div>
+
+      {/* สรุปผลวันนี้ — ใช้ followUps และ payments ของวันที่ปัจจุบัน */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
+        gap: 12,
+        width: '100%',
+        marginBottom: 24,
+      }}>
+        {[
+          { label: 'ติดต่อวันนี้', value: contactedTodayCount, suffix: 'ราย', color: '#7c5cbf' },
+          { label: 'ติดต่อสำเร็จ', value: successfulContactTodayCount, suffix: 'ราย', color: '#2d2545' },
+          { label: 'ชำระวันนี้', value: paidTodayCount, suffix: 'ราย', color: '#1a8f5a' },
+          { label: 'ยอดรับวันนี้', value: `฿${formatCurrency(receivedTodayAmount)}`, suffix: '', color: '#1a8f5a' },
+        ].map(item => (
+          <div key={item.label} className="glass-card" style={{
+            minHeight: 108,
+            padding: '20px 24px',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'center',
+            border: '1px solid rgba(196,181,240,0.46)',
+            boxShadow: '0 3px 12px rgba(95,71,148,0.04)',
+          }}>
+            <div style={{ fontSize: 13, color: '#a89cc8', marginBottom: 8 }}>{item.label}</div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 7, minWidth: 0 }}>
+              <span style={{
+                fontSize: typeof item.value === 'string' ? 25 : 28,
+                lineHeight: 1,
+                fontWeight: 700,
+                color: item.color,
+                whiteSpace: 'nowrap',
+              }}>
+                {item.value}
+              </span>
+              {item.suffix && <span style={{ fontSize: 13, color: '#a89cc8' }}>{item.suffix}</span>}
+            </div>
+          </div>
         ))}
       </div>
 
@@ -737,10 +1249,43 @@ export default function DashboardPage() {
       )}
 
       {/* 4. Task Table */}
-      <div className="glass-card" style={{ padding: 0, overflow: 'hidden', marginBottom: 24 }}>
+      <div id="daily-task-list" className="glass-card" style={{ padding: 0, overflow: 'hidden', marginBottom: 24, scrollMarginTop: 72 }}>
         <div style={{ padding: '14px 22px', borderBottom: '1px solid rgba(200,190,240,0.25)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 14, fontWeight: 700, color: '#2d2545' }}>รายการงานวันนี้</span>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#2d2545' }}>Task List ติดตามการชำระ</div>
+              <div style={{ fontSize: 10, color: '#a89cc8', marginTop: 2 }}>
+                ติดต่อวันนี้ {contactedTodayCount} ราย · งานค้างก่อนหน้า {previousPendingCount} ราย
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 5, marginLeft: 8, flexWrap: 'wrap' }}>
+              {TASK_SCOPE_LABELS.map(scope => {
+                const count = scope.key === 'today'
+                  ? contactedTodayCount
+                  : scope.key === 'previous'
+                    ? previousPendingCount
+                    : taskTaxpayers.length
+                const active = taskScope === scope.key
+                return (
+                  <button
+                    key={scope.key}
+                    type="button"
+                    onClick={() => setTaskScope(scope.key)}
+                    style={{
+                      border: active ? '1px solid #7c5cbf' : '1px solid rgba(180,165,230,0.35)',
+                      background: active ? '#7c5cbf' : '#fff',
+                      color: active ? '#fff' : '#61537e',
+                      borderRadius: 8, padding: '5px 9px', cursor: 'pointer',
+                      fontFamily: "'Sarabun',sans-serif", fontSize: 11,
+                    }}
+                  >
+                    {scope.label} {count}
+                  </button>
+                )
+              })}
+            </div>
+
             <span style={{ marginLeft: 'auto', fontSize: 12, color: '#a89cc8' }}>{filteredTps.length} รายการ</span>
 
             <div>
@@ -809,7 +1354,7 @@ export default function DashboardPage() {
                   ))}
                   <button
                     type="button"
-                    onClick={() => { setFollowFilters([]); setPaymentFilters([]) }}
+                    onClick={() => { setTaskScope('all'); setFollowFilters([]); setPaymentFilters([]) }}
                     disabled={activeTaskFilterCount === 0}
                     style={{
                       marginLeft: 'auto', border: 0, background: 'transparent',
@@ -864,9 +1409,9 @@ export default function DashboardPage() {
                 {filteredTps.map((tp, i) => {
                   const assess = tp.assessments.find(a => a.year === selectedYear)
                   const remaining = getTotalRemaining(tp, selectedYear)
-                  const lastFu = getLastFollowUp(tp)
+                  const lastFu = getLastFollowUp(tp, selectedYear)
                   const payStat = getPaymentStatus(tp, selectedYear)
-                  const followStat = getFollowStatus(tp)
+                  const followStat = getFollowStatus(tp, selectedYear)
                   const landRem2 = getLandRemaining(tp, selectedYear)
                   const signRem2 = getSignRemaining(tp, selectedYear)
                   const remainingTypes = [landRem2 > 0 ? 'ภาษีที่ดินฯ' : null, signRem2 > 0 ? 'ภาษีป้าย' : null].filter(Boolean) as string[]

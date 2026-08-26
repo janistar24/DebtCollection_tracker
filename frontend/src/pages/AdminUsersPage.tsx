@@ -4,6 +4,7 @@ import StatusBadge from '../components/StatusBadge'
 import Modal from '../components/Modal'
 import EmptyState from '../components/EmptyState'
 import type { User } from '../types'
+import { createUser, setUserActive, updateUserRecord } from '../api/users'
 
 const GROUPS = ['ก-น', 'บ-ล', 'ส-ศ', 'ว-ฮ และบริษัท']
 const ROLE_MAP: Record<string, string> = { officer: 'พนักงาน', director: 'ผู้บริหาร', admin: 'แอดมิน' }
@@ -12,35 +13,60 @@ export default function AdminUsersPage() {
   const { users, addUser, updateUser } = useApp()
   const [showModal, setShowModal] = useState(false)
   const [editUser, setEditUser] = useState<User | null>(null)
-  const [form, setForm] = useState({ code: '', name: '', role: 'officer', group: 'ก-น', active: true })
+  const [form, setForm] = useState({ code: '', name: '', username: '', password: '', role: 'officer', group: 'ก-น', active: true })
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
   const openAdd = () => {
     setEditUser(null)
-    setForm({ code: '', name: '', role: 'officer', group: 'ก-น', active: true })
+    setForm({ code: '', name: '', username: '', password: '', role: 'officer', group: 'ก-น', active: true })
     setShowModal(true)
   }
   const openEdit = (u: User) => {
     setEditUser(u)
-    setForm({ code: u.code, name: u.name, role: u.role, group: u.group ?? 'ก-น', active: u.active })
+    setForm({ code: u.code, name: u.name, username: u.username ?? '', password: '', role: u.role, group: u.group ?? 'ก-น', active: u.active })
     setShowModal(true)
   }
 
   const handleSave = async () => {
-    setSaving(true)
-    await new Promise(r => setTimeout(r, 500))
-    if (editUser) {
-      updateUser({ ...editUser, ...form, group: form.role === 'officer' ? form.group : undefined } as User)
-    } else {
-      addUser({ id: `u${Date.now()}`, ...form, group: form.role === 'officer' ? form.group : undefined } as User)
+    const parts = form.name.trim().split(/\s+/)
+    const firstName = parts.shift() ?? ''
+    const lastName = parts.join(' ')
+    if (!firstName || !lastName) return alert('กรุณากรอกชื่อและนามสกุล')
+    if (!editUser && form.password.length < 6) return alert('รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร')
+    const payload = {
+      employee_code: form.code.trim(), first_name: firstName, last_name: lastName,
+      username: form.username.trim(), password: form.password || undefined,
+      role: form.role.toUpperCase(), group_code: form.role === 'officer' ? form.group : null,
+      is_active: form.active,
     }
-    setSaving(false); setSaved(true)
-    setTimeout(() => { setSaved(false); setShowModal(false) }, 1200)
+    try {
+      setSaving(true)
+      if (editUser) {
+        await updateUserRecord(Number(editUser.id), payload)
+        updateUser({ ...editUser, code: form.code, name: form.name, username: form.username,
+          role: form.role as User['role'], active: form.active,
+          group: form.role === 'officer' ? form.group : undefined })
+      } else {
+        const id = await createUser({ ...payload, password: form.password })
+        addUser({ id, code: form.code, name: form.name, username: form.username,
+          role: form.role as User['role'], active: form.active,
+          group: form.role === 'officer' ? form.group : undefined })
+      }
+      setSaved(true)
+      setTimeout(() => { setSaved(false); setShowModal(false) }, 1200)
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'บันทึกผู้ใช้งานไม่สำเร็จ')
+    } finally { setSaving(false) }
   }
 
-  const handleToggleActive = (u: User) => {
-    updateUser({ ...u, active: !u.active })
+  const handleToggleActive = async (u: User) => {
+    try {
+      await setUserActive(Number(u.id), !u.active)
+      updateUser({ ...u, active: !u.active })
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'เปลี่ยนสถานะผู้ใช้งานไม่สำเร็จ')
+    }
   }
 
   return (
@@ -108,6 +134,18 @@ export default function AdminUsersPage() {
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                   <div>
+                    <label style={LBL}>Username *</label>
+                    <input className="input-field" placeholder="username" value={form.username}
+                      onChange={e => setForm(f => ({ ...f, username: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label style={LBL}>{editUser ? 'รหัสผ่านใหม่ (ไม่เปลี่ยนให้เว้นว่าง)' : 'รหัสผ่าน *'}</label>
+                    <input className="input-field" type="password" placeholder="อย่างน้อย 6 ตัวอักษร" value={form.password}
+                      onChange={e => setForm(f => ({ ...f, password: e.target.value }))} />
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                  <div>
                     <label style={LBL}>สิทธิ์ (Role)</label>
                     <select className="input-field" value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}>
                       <option value="officer">พนักงาน</option>
@@ -127,7 +165,7 @@ export default function AdminUsersPage() {
               </div>
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 24 }}>
                 <button className="btn-secondary" onClick={() => setShowModal(false)}>ยกเลิก</button>
-                <button className="btn-primary" onClick={handleSave} disabled={saving || !form.code || !form.name}>
+                <button className="btn-primary" onClick={handleSave} disabled={saving || !form.code || !form.name || !form.username || (!editUser && form.password.length < 6)}>
                   {saving ? '⏳...' : '💾 บันทึก'}
                 </button>
               </div>

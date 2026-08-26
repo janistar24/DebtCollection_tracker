@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useApp } from '../context/AppContext'
-import { createCompletePayment, getAllocatedPayments } from '../api/payments'
+import { createCompletePayment } from '../api/payments'
 import { formatCurrency, getLandRemaining, getSignRemaining, getTaxpayerName } from '../data/mockData'
 import type { Taxpayer } from '../types'
 
@@ -22,7 +22,7 @@ const localDateTimeNow = () => {
 }
 
 export default function PaymentForm({ taxpayer, year, initialAmount, initialMethod = 'transfer', initialScope, onCancel, onSuccess }: Props) {
-  const { currentUser, refreshData } = useApp()
+  const { currentUser, addPayment, refreshData } = useApp()
   const assessment = taxpayer.assessments.find(item => item.year === year)
   const landRemaining = getLandRemaining(taxpayer, year)
   const signRemaining = getSignRemaining(taxpayer, year)
@@ -111,11 +111,20 @@ export default function PaymentForm({ taxpayer, year, initialAmount, initialMeth
         allocations,
       })
 
-      // ถือว่าสำเร็จเมื่ออ่านรายการที่เพิ่งบันทึกกลับจากฐานข้อมูลได้เท่านั้น
-      const savedPayments = await getAllocatedPayments()
-      if (!savedPayments.some(payment => payment.id === paymentId)) {
-        throw new Error('เซิร์ฟเวอร์ตอบว่าสำเร็จ แต่ไม่พบรายการชำระในฐานข้อมูล กรุณาตรวจสอบก่อนบันทึกซ้ำ')
-      }
+      // API ตอบหลัง transaction commit แล้ว จึงอัปเดตเฉพาะผู้เสียภาษีคนนี้
+      addPayment({
+        id: paymentId,
+        taxpayerId: taxpayer.id,
+        amount: paymentAmount,
+        date: dateTime.slice(0, 10),
+        method,
+        refNo: method === 'transfer' ? reference || undefined : undefined,
+        receiptNo: method === 'cash' ? receipt || undefined : undefined,
+        allocatedLand,
+        allocatedSign,
+        recordedBy: currentUser?.id ?? '',
+        taxYear: year,
+      })
       await refreshData()
       setSaved(true)
       setTimeout(() => onSuccess?.(), 900)

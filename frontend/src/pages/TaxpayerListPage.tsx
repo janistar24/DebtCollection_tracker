@@ -18,6 +18,7 @@ import {
   removeTaxpayerFromYear,
   updateTaxpayerYearRecord
 } from '../api/taxpayer_year_records'
+import { bulkSaveTaxpayerYearRecords } from '../api/taxpayer_year_records'
 import type { Taxpayer } from '../types'
 
 const GROUPS = ['ก-น', 'บ-ล', 'ส-ศ', 'ว-ฮ และบริษัท']
@@ -53,7 +54,9 @@ export default function TaxpayerListPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const isDirector = currentUser?.role === 'director' || currentUser?.role === 'admin'
-  const isCurrentYear = selectedYear === CURRENT_YEAR
+  const openedYears = taxpayers.flatMap(tp => tp.assessments.map(a => a.year))
+  const latestOpenedYear = openedYears.length > 0 ? Math.max(CURRENT_YEAR, ...openedYears) : CURRENT_YEAR
+  const isCurrentYear = selectedYear === latestOpenedYear
 
   const [search, setSearch] = useState('')
   const [groupFilter, setGroupFilter] = useState(searchParams.get('group') ?? (isDirector ? 'all' : (currentUser?.group ?? 'all')))
@@ -71,6 +74,9 @@ export default function TaxpayerListPage() {
   const [reasonInput, setReasonInput] = useState('')
   const [saving, setSaving] = useState(false)
   const [saveConfirm, setSaveConfirm] = useState(false)
+  const [showOpenYearModal, setShowOpenYearModal] = useState(false)
+  const [openingYear, setOpeningYear] = useState(false)
+  const [openYearError, setOpenYearError] = useState('')
 
   // Remove taxpayer
   const [removeTarget, setRemoveTarget] = useState<Taxpayer | null>(null)
@@ -114,6 +120,81 @@ export default function TaxpayerListPage() {
     ? (groupFilter === 'all' ? 'ทุกกลุ่ม' : groupFilter)
     : (currentUser?.group ?? groupFilter)
 
+  const visibleForYear = (tp: Taxpayer) => {
+    if (!isDirector && tp.group !== currentUser?.group) return false
+    if (isDirector && groupFilter !== 'all' && tp.group !== groupFilter) return false
+    return true
+  }
+
+  const hasSelectedYearData = taxpayers.some(tp =>
+    visibleForYear(tp) && tp.assessments.some(a => a.year === selectedYear)
+  )
+
+  const sourceYear = selectedYear - 1
+  const sourceTaxpayers = taxpayers.filter(tp =>
+    visibleForYear(tp) && tp.assessments.some(a => a.year === sourceYear)
+  )
+
+  const handleOpenYear = async () => {
+    if (sourceTaxpayers.length === 0) return
+    try {
+      setOpeningYear(true)
+      setOpenYearError('')
+      const results = await bulkSaveTaxpayerYearRecords({
+        tax_year: selectedYear,
+        user_id: currentUser?.id ? Number(currentUser.id) : null,
+        items: sourceTaxpayers.map(tp => {
+          const source = tp.assessments.find(a => a.year === sourceYear)!
+          return {
+            taxpayer_id: Number(tp.id),
+            year_record_id: null,
+            include: true,
+            note: source.note ?? tp.notes ?? null,
+            land_amount: source.landAmount,
+            sign_amount: source.signAmount,
+            prev_land_amount: source.landAmount,
+            prev_sign_amount: source.signAmount,
+            land_reason: null,
+            sign_reason: null,
+          }
+        }),
+      })
+      const resultByTaxpayer = new Map(
+        results.map(result => [String(result.taxpayer_id), result]),
+      )
+      for (const tp of sourceTaxpayers) {
+        const source = tp.assessments.find(a => a.year === sourceYear)!
+        const result = resultByTaxpayer.get(tp.id)
+        if (!result) continue
+        updateTaxpayer({
+          ...tp,
+          notes: result.note ?? '',
+          assessments: [
+            ...tp.assessments.filter(a => a.year !== selectedYear),
+            {
+              yearRecordId: String(result.year_record_id),
+              landAssessmentId: result.assessment_ids?.LAND_BUILDING
+                ? String(result.assessment_ids.LAND_BUILDING) : '',
+              signAssessmentId: result.assessment_ids?.SIGN
+                ? String(result.assessment_ids.SIGN) : '',
+              year: selectedYear,
+              landAmount: result.land_amount ?? source.landAmount,
+              signAmount: result.sign_amount ?? source.signAmount,
+              prevLandAmount: source.landAmount,
+              prevSignAmount: source.signAmount,
+              note: result.note ?? '',
+            },
+          ],
+        })
+      }
+      setShowOpenYearModal(false)
+    } catch (error) {
+      setOpenYearError(error instanceof Error ? error.message : 'เปิดรอบปีภาษีไม่สำเร็จ')
+    } finally {
+      setOpeningYear(false)
+    }
+  }
+
   // Cell value with pending edit applied
   const cellVal = (tp: Taxpayer, type: 'land' | 'sign') => {
     const key = `${tp.id}-${type}`
@@ -144,6 +225,69 @@ export default function TaxpayerListPage() {
   }
 
 const handleSaveAll = async () => {
+  try {
+    setSaving(true)
+    const affectedIds = new Set([
+      ...Object.keys(pendingAdds), ...Object.keys(pendingRemoves),
+      ...Object.keys(pendingNotes), ...Object.keys(pendingEdits).map(key => key.split('-')[0]),
+    ])
+    const items = [...affectedIds].map(id => {
+      const tp = taxpayers.find(item => item.id === id)!
+      const assessment = tp.assessments.find(item => item.year === selectedYear)
+        ?? removedAssessmentCache[id]
+      const include = Boolean(pendingAdds[id]) || !pendingRemoves[id]
+      const landEdit = pendingEdits[`${id}-land`]
+      const signEdit = pendingEdits[`${id}-sign`]
+      return {
+        taxpayer_id: Number(id),
+        year_record_id: assessment?.yearRecordId ? Number(assessment.yearRecordId) : null,
+        include,
+        note: pendingNotes[id] ?? tp.notes ?? null,
+        land_amount: include && (pendingAdds[id] || landEdit) ? (landEdit?.newVal ?? assessment?.landAmount ?? 0) : null,
+        sign_amount: include && (pendingAdds[id] || signEdit) ? (signEdit?.newVal ?? assessment?.signAmount ?? 0) : null,
+        prev_land_amount: assessment?.prevLandAmount ?? 0,
+        prev_sign_amount: assessment?.prevSignAmount ?? 0,
+        land_reason: landEdit?.reason ?? null,
+        sign_reason: signEdit?.reason ?? null,
+      }
+    })
+    const results = await bulkSaveTaxpayerYearRecords({
+      tax_year: selectedYear,
+      user_id: currentUser?.id ? Number(currentUser.id) : null,
+      items,
+    })
+    const resultMap = new Map(results.map(result => [String(result.taxpayer_id), result]))
+    for (const id of affectedIds) {
+      const tp = taxpayers.find(item => item.id === id)
+      const result = resultMap.get(id)
+      if (!tp || !result) continue
+      if (!result.included) {
+        updateTaxpayer({ ...tp, assessments: tp.assessments.filter(item => item.year !== selectedYear) })
+        continue
+      }
+      const old = tp.assessments.find(item => item.year === selectedYear) ?? removedAssessmentCache[id]
+      const next = {
+        yearRecordId: String(result.year_record_id),
+        landAssessmentId: result.assessment_ids?.LAND_BUILDING ? String(result.assessment_ids.LAND_BUILDING) : old?.landAssessmentId ?? '',
+        signAssessmentId: result.assessment_ids?.SIGN ? String(result.assessment_ids.SIGN) : old?.signAssessmentId ?? '',
+        year: selectedYear,
+        landAmount: result.land_amount ?? old?.landAmount ?? 0,
+        signAmount: result.sign_amount ?? old?.signAmount ?? 0,
+        prevLandAmount: old?.prevLandAmount ?? 0,
+        prevSignAmount: old?.prevSignAmount ?? 0,
+        note: result.note ?? '',
+      }
+      updateTaxpayer({ ...tp, notes: result.note ?? '', assessments: [...tp.assessments.filter(item => item.year !== selectedYear), next] })
+    }
+    setPendingEdits({}); setPendingNotes({}); setPendingAdds({}); setPendingRemoves({})
+    setSaveConfirm(false); setEditMode(false)
+  } catch (error) {
+    console.error('Save annual taxpayer error:', error)
+    alert(error instanceof Error ? error.message : 'บันทึกข้อมูลไม่สำเร็จ')
+  } finally { setSaving(false) }
+}
+
+const handleSaveAllLegacy = async () => {
   try {
     setSaving(true)
 
@@ -578,6 +722,83 @@ const handleInlineAdd = async () => {
     changedNoteCount
 
   const hasPending = pendingCount > 0
+
+  if (!hasSelectedYearData) {
+    return (
+      <div className="annual-taxpayer-page" style={{ padding: 24, maxWidth: 1400 }}>
+        <div className="glass-card" style={{
+          minHeight: 360,
+          padding: '54px 24px',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          textAlign: 'center',
+        }}>
+          <div style={{
+            width: 58, height: 58, borderRadius: 16,
+            display: 'grid', placeItems: 'center', marginBottom: 16,
+            background: 'rgba(124,92,191,0.1)', fontSize: 26,
+          }}>📅</div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: '#2d2545', marginBottom: 6 }}>
+            ยังไม่มีข้อมูลปีภาษี {selectedYear}
+          </div>
+          <div style={{ fontSize: 13, color: '#a89cc8', marginBottom: 20 }}>
+            {sourceTaxpayers.length > 0
+              ? `สร้างข้อมูลตั้งต้นจากปี ${sourceYear} จำนวน ${sourceTaxpayers.length} ราย โดยไม่กระทบข้อมูลปีเดิม`
+              : `ไม่พบข้อมูลปี ${sourceYear} สำหรับใช้เป็นข้อมูลตั้งต้น`}
+          </div>
+          <button
+            className="btn-primary"
+            disabled={sourceTaxpayers.length === 0}
+            onClick={() => { setOpenYearError(''); setShowOpenYearModal(true) }}
+          >
+            เปิดรอบปี {selectedYear}
+          </button>
+        </div>
+
+        {showOpenYearModal && (
+          <Modal title={`เปิดรอบปีภาษี ${selectedYear}`} onClose={() => !openingYear && setShowOpenYearModal(false)} maxWidth="560px">
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: 12, alignItems: 'end', marginBottom: 16 }}>
+              <div>
+                <label style={LBL}>นำข้อมูลจากปี</label>
+                <div className="input-field" style={{ background: 'rgba(240,236,251,.35)' }}>{sourceYear}</div>
+              </div>
+              <div style={{ paddingBottom: 10, color: '#7c5cbf' }}>→</div>
+              <div>
+                <label style={LBL}>สร้างเป็นปีภาษี</label>
+                <div className="input-field" style={{ background: 'rgba(240,236,251,.35)' }}>{selectedYear}</div>
+              </div>
+            </div>
+
+            <div style={{ padding: '14px 16px', borderRadius: 12, background: 'rgba(240,236,251,.42)', fontSize: 13, color: '#5f5178' }}>
+              <div style={{ fontWeight: 700, color: '#2d2545', marginBottom: 9 }}>ระบบจะดำเนินการดังนี้</div>
+              <div style={{ marginBottom: 6 }}>✓ คัดลอกรายชื่อ ข้อมูลติดต่อ กลุ่ม และยอดภาษีเดิม {sourceTaxpayers.length} ราย</div>
+              <div style={{ marginBottom: 6 }}>✓ หลังสร้างยังเพิ่ม ลด และแก้ไขข้อมูลในตารางได้ตามปกติ</div>
+              <div style={{ color: '#c0392b' }}>× ไม่คัดลอกประวัติการชำระและประวัติการติดต่อ</div>
+            </div>
+
+            <div style={{ marginTop: 12, fontSize: 12, color: '#8a5a00' }}>
+              หลังยืนยัน ระบบจะเปิดตารางปี {selectedYear} รูปแบบเดียวกับปีปัจจุบันทันที
+            </div>
+
+            {openYearError && (
+              <div style={{ marginTop: 12, padding: '9px 12px', borderRadius: 9, background: '#fff1f0', color: '#c0392b', fontSize: 12 }}>
+                {openYearError}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20 }}>
+              <button className="btn-secondary" disabled={openingYear} onClick={() => setShowOpenYearModal(false)}>ยกเลิก</button>
+              <button className="btn-primary" disabled={openingYear} onClick={handleOpenYear}>
+                {openingYear ? '⏳ กำลังเปิดรอบ...' : `ยืนยันเปิดรอบปี ${selectedYear}`}
+              </button>
+            </div>
+          </Modal>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="annual-taxpayer-page" style={{ padding: 24, maxWidth: 1400 }}>

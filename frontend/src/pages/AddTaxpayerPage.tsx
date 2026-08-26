@@ -1,20 +1,12 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useApp } from '../context/AppContext'
-import { CURRENT_YEAR } from '../data/mockData'
 import { generateOwnerCode, isDuplicateCode } from '../utils/ownerCode'
 import type { Taxpayer } from '../types'
-import { createTaxpayer } from '../api/taxpayers'
-import {
-  createTaxpayerYearRecord
-} from '../api/taxpayer_year_records'
-
-import {
-  createTaxAssessment
-} from '../api/tax_assessments'
+import { createCompleteTaxpayer } from '../api/taxpayers'
 
 export default function AddTaxpayerPage() {
-  const { currentUser, taxpayers, refreshData } = useApp()
+  const { currentUser, taxpayers, selectedYear, addTaxpayer } = useApp()
   const navigate = useNavigate()
 
   const [tpType, setTpType] = useState<'individual' | 'company'>('individual')
@@ -100,12 +92,11 @@ const handleSubmit = async (
         : getGroupFromCode(generatedCode)
 
 
-    // ============================
-    // 1. CREATE MASTER TAXPAYER
-    // ============================
+    const land = parseFloat(landAmount) || 0
+    const sign = parseFloat(signAmount) || 0
 
-    const taxpayerResult =
-      await createTaxpayer({
+    // สร้าง taxpayer, year record และ assessments ด้วย request/transaction เดียว
+    const result = await createCompleteTaxpayer({
         taxpayer_type:
           tpType === 'company'
             ? 'COMPANY'
@@ -139,31 +130,16 @@ const handleSubmit = async (
           group,
 
         is_active:
-          true
-      })
-
-
-    // ต้องได้ taxpayer_id กลับมาจาก API
-    const taxpayerId =
-      Number(
-        taxpayerResult.data.taxpayer_id
-      )
-
-
-    // ============================
-    // 2. CREATE YEAR RECORD
-    // ============================
-
-    const yearResult =
-      await createTaxpayerYearRecord({
-        taxpayer_id:
-          taxpayerId,
+          true,
 
         tax_year:
-          CURRENT_YEAR,
+          selectedYear,
 
-        note:
-          null,
+        land_amount:
+          land,
+
+        sign_amount:
+          sign,
 
         added_by:
           currentUser?.id
@@ -171,96 +147,37 @@ const handleSubmit = async (
             : null
       })
 
-
-    const yearRecordId =
-      Number(
-        yearResult.data.year_record_id
-      )
-
-
-    const land =
-      parseFloat(landAmount) || 0
-
-    const sign =
-      parseFloat(signAmount) || 0
-
-
-    // ============================
-    // CREATE LAND ASSESSMENT
-    // ============================
-
-    if (land > 0) {
-      await createTaxAssessment({
-        year_record_id:
-          yearRecordId,
-
-        tax_type:
-          'LAND_BUILDING',
-
-        assessed_amount:
-          land,
-
-        previous_amount:
-          0,
-
-        change_reason:
-          null,
-
-        assessment_date:
-          null,
-
-        annual_due_date:
-          null,
-
-        created_by:
-          currentUser?.id
-            ? Number(currentUser.id)
-            : null
-      })
-    }
-
-
-    // ============================
-    // CREATE SIGN ASSESSMENT
-    // ============================
-
-    if (sign > 0) {
-      await createTaxAssessment({
-        year_record_id:
-          yearRecordId,
-
-        tax_type:
-          'SIGN',
-
-        assessed_amount:
-          sign,
-
-        previous_amount:
-          0,
-
-        change_reason:
-          null,
-
-        assessment_date:
-          null,
-
-        annual_due_date:
-          null,
-
-        created_by:
-          currentUser?.id
-            ? Number(currentUser.id)
-            : null
-      })
-    }
-
-
-    // โหลดข้อมูลล่าสุดจากฐานข้อมูล
-    await refreshData()
+    const assessmentIds = result.data.assessment_ids as Record<string, number | undefined>
+    addTaxpayer({
+      id: String(result.data.taxpayer_id),
+      ownerCode: ownerCode ?? '',
+      type: tpType,
+      firstName: tpType === 'individual' ? firstName : '',
+      lastName: tpType === 'individual' ? lastName : '',
+      companyName: tpType === 'company' ? companyName : undefined,
+      phone,
+      address,
+      group,
+      responsibleOfficer: currentUser?.id ?? '',
+      active: true,
+      notes: '',
+      followUps: [],
+      payments: [],
+      assessments: [{
+        yearRecordId: String(result.data.year_record_id),
+        landAssessmentId: assessmentIds.LAND_BUILDING ? String(assessmentIds.LAND_BUILDING) : '',
+        signAssessmentId: assessmentIds.SIGN ? String(assessmentIds.SIGN) : '',
+        year: selectedYear,
+        landAmount: land,
+        signAmount: sign,
+        prevLandAmount: 0,
+        prevSignAmount: 0,
+        note: '',
+      }],
+    })
 
     setSaved(true)
 
-    // เปลี่ยนหน้าด้วย React โดยไม่ reload
     navigate('/taxpayers')
 
   } catch (error) {
@@ -404,7 +321,7 @@ const handleSubmit = async (
         {/* Tax amounts */}
         <div className="glass-card" style={{ padding: '24px 28px', marginBottom: 28 }}>
           <h2 style={{ margin: '0 0 20px', fontSize: 16, fontWeight: 700, color: '#2d2545', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 18 }}>💰</span> ข้อมูลภาษีประจำปี {CURRENT_YEAR}
+            <span style={{ fontSize: 18 }}>💰</span> ข้อมูลภาษีประจำปี {selectedYear}
           </h2>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
             <div className="glass-card" style={{ padding: '16px 18px', background: 'rgba(218,237,248,0.35)' }}>

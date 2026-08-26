@@ -6,12 +6,13 @@ import Modal from '../components/Modal'
 import {
   getTaxpayerName, formatCurrency, formatDate, formatDateTime,
   getPaymentStatus, getLandRemaining, getSignRemaining, CURRENT_YEAR,
-  getUserById, getLandPaid, getSignPaid
+  getLandPaid, getSignPaid
 } from '../data/mockData'
 import type { FollowUp, Payment, Taxpayer } from '../types'
 import { deleteTaxpayerMaster, updateTaxpayerMaster } from '../api/taxpayers'
 import { generateOwnerCode, isDuplicateCode } from '../utils/ownerCode'
 import { createCompletePayment } from '../api/payments'
+import { createFollowUpLog } from '../api/follow_up_logs'
 import PaymentForm from '../components/PaymentForm'
 
 // Extract short keyword tags from a freeform note string
@@ -149,7 +150,7 @@ const localDateTimeNow = () => {
 
 export default function TaxpayerDetailPage() {
   const { id } = useParams<{ id: string }>()
-  const { taxpayers, addFollowUp, addPayment, currentUser, refreshData } = useApp()
+  const { taxpayers, users, addFollowUp, addPayment, updateTaxpayer, removeTaxpayer, currentUser, refreshData } = useApp()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const tp = taxpayers.find(t => t.id === id)
@@ -200,11 +201,11 @@ export default function TaxpayerDetailPage() {
     </div>
   )
 
-  const officer = getUserById(tp.responsibleOfficer)
+  const officer = users.find(user => user.id === tp.responsibleOfficer)
   const payStat = getPaymentStatus(tp, CURRENT_YEAR)
   const assess = tp.assessments.find(a => a.year === CURRENT_YEAR)
-  const landPaid = getLandPaid(tp)
-  const signPaid = getSignPaid(tp)
+  const landPaid = getLandPaid(tp, CURRENT_YEAR)
+  const signPaid = getSignPaid(tp, CURRENT_YEAR)
   const landRem = getLandRemaining(tp, CURRENT_YEAR)
   const signRem = getSignRemaining(tp, CURRENT_YEAR)
 
@@ -225,17 +226,35 @@ export default function TaxpayerDetailPage() {
   ].sort((a, b) => b.date.localeCompare(a.date))
 
   const handleSaveFu = async () => {
-    setFuSaving(true)
-    await new Promise(r => setTimeout(r, 500))
-    const fu: FollowUp = {
-      id: `fu${Date.now()}`, taxpayerId: tp.id, type: fuType, date: fuDate,
-      result: fuResult as FollowUp['result'], detail: fuDetail,
-      promiseDate: fuPromiseDate || undefined, promiseAmount: parseFloat(fuPromiseAmt) || undefined,
-      nextFollowDate: fuNextDate || undefined, recordedBy: currentUser?.id ?? 'u1'
+    try {
+      setFuSaving(true)
+      const followUpId = await createFollowUpLog({
+        taxpayer_id: Number(tp.id),
+        tax_year: CURRENT_YEAR,
+        tax_scope: 'BOTH',
+        contact_type: fuType,
+        contacted_at: fuDate,
+        result: fuResult || 'other',
+        detail: fuDetail || null,
+        promise_date: fuPromiseDate || null,
+        promise_amount: parseFloat(fuPromiseAmt) || null,
+        next_follow_date: fuNextDate || null,
+        recorded_by: currentUser?.id ? Number(currentUser.id) : null,
+      })
+      const fu: FollowUp = {
+        id: followUpId, taxpayerId: tp.id, type: fuType, date: fuDate,
+        result: fuResult as FollowUp['result'], detail: fuDetail,
+        promiseDate: fuPromiseDate || undefined, promiseAmount: parseFloat(fuPromiseAmt) || undefined,
+        nextFollowDate: fuNextDate || undefined, recordedBy: currentUser?.id ?? '', taxYear: CURRENT_YEAR
+      }
+      addFollowUp(fu)
+      setFuSaved(true)
+      setTimeout(() => { setFuSaved(false); setShowFollowModal(false) }, 1200)
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'บันทึกการติดต่อไม่สำเร็จ')
+    } finally {
+      setFuSaving(false)
     }
-    addFollowUp(fu)
-    setFuSaving(false); setFuSaved(true)
-    setTimeout(() => { setFuSaved(false); setShowFollowModal(false) }, 1200)
   }
 
   const handleSavePay = async () => {
@@ -259,6 +278,7 @@ export default function TaxpayerDetailPage() {
         payment_amount: amt,
         // ฐานข้อมูลปัจจุบันเป็นชนิด DATE จึงส่งเฉพาะ YYYY-MM-DD
         payment_date: payDate.slice(0, 10),
+        payment_datetime: new Date(payDate).toISOString(),
         payment_method: payMethod,
         reference_no: payMethod === 'transfer' ? payRef || null : null,
         receipt_no: payMethod === 'cash' ? payReceipt || null : null,
@@ -269,9 +289,10 @@ export default function TaxpayerDetailPage() {
         id: paymentId, taxpayerId: tp.id, amount: amt,
         date: payDate, method: payMethod, refNo: payMethod === 'transfer' ? payRef : undefined,
         receiptNo: payMethod === 'cash' ? payReceipt : undefined,
-        allocatedLand: allocLand, allocatedSign: allocSign, recordedBy: currentUser?.id ?? ''
+        allocatedLand: allocLand, allocatedSign: allocSign, recordedBy: currentUser?.id ?? '', taxYear: CURRENT_YEAR
       }
       addPayment(pay)
+      await refreshData()
       setPaySaved(true)
       setTimeout(() => { setPaySaved(false); setShowPayModal(false) }, 1200)
     } catch (error) {
@@ -323,7 +344,7 @@ export default function TaxpayerDetailPage() {
     try {
       setMasterSaving(true)
       await updateTaxpayerMaster(Number(editing.id), { taxpayer_type: editing.type === 'company' ? 'COMPANY' : 'INDIVIDUAL', owner_code: editing.type === 'individual' ? editing.ownerCode : null, first_name: editing.type === 'individual' ? editing.firstName : null, last_name: editing.type === 'individual' ? editing.lastName : null, company_name: editing.type === 'company' ? editing.companyName ?? null : null, phone: editing.phone || null, address: editing.address || null, group_code: editing.group, is_active: editing.active })
-      await refreshData(); setEditing(null); setSearchParams({}, { replace: true }); alert('บันทึกข้อมูลผู้เสียภาษีเรียบร้อยแล้ว')
+      updateTaxpayer({ ...editing }); setEditing(null); setSearchParams({}, { replace: true }); alert('บันทึกข้อมูลผู้เสียภาษีเรียบร้อยแล้ว')
     } catch (error) { alert(error instanceof Error ? error.message : 'บันทึกไม่สำเร็จ') }
     finally { setMasterSaving(false) }
   }
@@ -345,7 +366,7 @@ export default function TaxpayerDetailPage() {
 
   async function handleDeleteMaster(target: Taxpayer) {
     if (!confirm(`ลบ ${getTaxpayerName(target)} ออกจากฐานข้อมูลถาวรหรือไม่?`)) return
-    try { await deleteTaxpayerMaster(Number(target.id)); await refreshData(); navigate('/taxpayers/manage') }
+    try { await deleteTaxpayerMaster(Number(target.id)); removeTaxpayer(target.id); navigate('/taxpayers/manage') }
     catch (error) { alert(error instanceof Error ? error.message : 'ลบไม่สำเร็จ') }
   }
 
@@ -555,7 +576,7 @@ export default function TaxpayerDetailPage() {
       {/* Payment Modal */}
       {showPayModal && (
         <Modal title="บันทึกการชำระ" onClose={() => setShowPayModal(false)}>
-          <PaymentForm taxpayer={tp} year={CURRENT_YEAR} onCancel={() => setShowPayModal(false)} onSuccess={() => setShowPayModal(false)} />
+          <PaymentForm key={`${tp.id}-${CURRENT_YEAR}`} taxpayer={tp} year={CURRENT_YEAR} onCancel={() => setShowPayModal(false)} onSuccess={() => setShowPayModal(false)} />
           {false && (paySaved ? (
             <div style={{ textAlign: 'center', padding: '24px 0' }}>
               <div style={{ fontSize: 36, marginBottom: 8 }}>✅</div>

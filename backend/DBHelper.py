@@ -1,5 +1,7 @@
 import os
 from contextlib import contextmanager
+from queue import Empty, LifoQueue
+from threading import Lock
 
 import psycopg
 from dotenv import load_dotenv
@@ -9,6 +11,7 @@ load_dotenv()
 
 
 class DBHelper:
+    """PostgreSQL helper ที่นำ connection กลับมาใช้ซ้ำ"""
 
     def __init__(self):
         self.host = os.getenv("POSTGRES_HOST")
@@ -16,109 +19,126 @@ class DBHelper:
         self.user = os.getenv("POSTGRES_USER")
         self.password = os.getenv("POSTGRES_PASSWORD")
         self.db = os.getenv("POSTGRES_DB")
+        self.min_pool_size = max(1, int(os.getenv("DB_POOL_MIN", "1")))
+        self.max_pool_size = max(self.min_pool_size, int(os.getenv("DB_POOL_MAX", "8")))
+        self.pool_timeout = float(os.getenv("DB_POOL_TIMEOUT", "15"))
+        self._pool: LifoQueue[psycopg.Connection] = LifoQueue(maxsize=self.max_pool_size)
+        self._pool_lock = Lock()
+        self._connection_count = 0
 
-    def __connect__(self):
-        self.con = psycopg.connect(
+        for _ in range(self.min_pool_size):
+            self._pool.put(self._new_connection())
+            self._connection_count += 1
+
+    def _new_connection(self) -> psycopg.Connection:
+        return psycopg.connect(
             host=self.host,
             port=self.port,
             user=self.user,
             password=self.password,
             dbname=self.db,
+            connect_timeout=10,
         )
-        self.cur = self.con.cursor()
 
-    def __disconnect__(self):
-        if hasattr(self, "cur") and self.cur:
-            self.cur.close()
+    def _acquire(self) -> psycopg.Connection:
+        try:
+            connection = self._pool.get_nowait()
+        except Empty:
+            with self._pool_lock:
+                if self._connection_count < self.max_pool_size:
+                    connection = self._new_connection()
+                    self._connection_count += 1
+                    return connection
+            connection = self._pool.get(timeout=self.pool_timeout)
 
-        if hasattr(self, "con") and self.con:
-            self.con.close()
+        if connection.closed:
+            with self._pool_lock:
+                self._connection_count = max(0, self._connection_count - 1)
+            return self._acquire()
+        return connection
+
+    def _discard(self, connection: psycopg.Connection) -> None:
+        try:
+            connection.close()
+        finally:
+            with self._pool_lock:
+                self._connection_count = max(0, self._connection_count - 1)
+
+    def _release(self, connection: psycopg.Connection) -> None:
+        if connection.closed:
+            self._discard(connection)
+            return
+        try:
+            connection.rollback()
+            self._pool.put_nowait(connection)
+        except Exception:
+            self._discard(connection)
+
+    @contextmanager
+    def connection(self):
+        connection = self._acquire()
+        try:
+            yield connection
+        finally:
+            self._release(connection)
 
     @contextmanager
     def transaction(self):
-        """
-        ใช้ connection เดียวสำหรับคำสั่งหลายรายการ
-
-        ถ้าทุกคำสั่งสำเร็จ:
-            commit
-
-        ถ้ามีคำสั่งใดล้มเหลว:
-            rollback ทั้งหมด
-        """
-        connection = psycopg.connect(
-            host=self.host,
-            port=self.port,
-            user=self.user,
-            password=self.password,
-            dbname=self.db,
-        )
-
+        connection = self._acquire()
         cursor = connection.cursor()
-
         try:
             yield cursor
             connection.commit()
-
         except Exception:
             connection.rollback()
             raise
-
         finally:
             cursor.close()
-            connection.close()
+            self._release(connection)
 
     def fetch(self, sql, params=None):
-        self.__connect__()
+        with self.connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, params)
+                data = cursor.fetchall()
+                columns = tuple(item.name for item in cursor.description)
+                return data, columns
 
-        try:
-            self.cur.execute(sql, params)
-
-            data = self.cur.fetchall()
-
-            columns = tuple(
-                description.name
-                for description in self.cur.description
-            )
-
-            return data, columns
-
-        finally:
-            self.__disconnect__()
+    def fetch_one(self, sql, params=None):
+        with self.connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, params)
+                data = cursor.fetchone()
+                columns = tuple(item.name for item in cursor.description)
+                return data, columns
 
     def execute(self, sql, params=None):
-        self.__connect__()
-
-        try:
-            self.cur.execute(sql, params)
-            self.con.commit()
-
-        except Exception:
-            self.con.rollback()
-            raise
-
-        finally:
-            self.__disconnect__()
+        with self.connection() as connection:
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute(sql, params)
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
 
     def execute_returning(self, sql, params=None):
-        self.__connect__()
+        with self.connection() as connection:
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute(sql, params)
+                    data = cursor.fetchone()
+                    columns = tuple(item.name for item in cursor.description)
+                connection.commit()
+                return data, columns
+            except Exception:
+                connection.rollback()
+                raise
 
-        try:
-            self.cur.execute(sql, params)
-
-            data = self.cur.fetchone()
-
-            columns = tuple(
-                description.name
-                for description in self.cur.description
-            )
-
-            self.con.commit()
-
-            return data, columns
-
-        except Exception:
-            self.con.rollback()
-            raise
-
-        finally:
-            self.__disconnect__()
+    def close(self) -> None:
+        while True:
+            try:
+                connection = self._pool.get_nowait()
+            except Empty:
+                break
+            self._discard(connection)
