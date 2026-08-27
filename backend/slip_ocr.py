@@ -57,7 +57,7 @@ def read_slip(data: bytes, content_type: str) -> dict:
             temp_path = temp_file.name
 
         result = subprocess.run(
-            ["tesseract", temp_path, "stdout", "-l", "eng+snum", "--psm", "6"],
+            ["tesseract", temp_path, "stdout", "-l", "eng+tha", "--psm", "6"],
             capture_output=True,
             text=True,
             timeout=25,

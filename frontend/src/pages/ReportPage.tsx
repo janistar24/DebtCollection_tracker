@@ -69,7 +69,7 @@ export default function ReportPage() {
       <Filter label="สถานะ" value={statusFilter} setValue={setStatusFilter} options={[['all','ทุกสถานะ'],['unpaid','ยังไม่ชำระ'],['partial','ชำระบางส่วน'],['paid','ชำระครบ']]} />
       <Filter label="ประเภทภาษี" value={taxTypeFilter} setValue={setTaxTypeFilter} options={[['all','ทุกประเภท'],['land','ที่ดินและสิ่งปลูกสร้าง'],['sign','ภาษีป้าย']]} />
       <Filter label="ประเภทบุคคล" value={personTypeFilter} setValue={setPersonTypeFilter} options={[['all','ทุกประเภท'],['individual','บุคคลธรรมดา'],['company','นิติบุคคล / บริษัท']]} />
-      <button className="btn-primary" onClick={() => window.print()} style={{ marginLeft: 'auto', fontSize: 13 }}>🖨 พิมพ์รายงาน / Export PDF</button>
+      <button className="btn-primary" onClick={() => window.print()} style={{ marginLeft: 'auto', fontSize: 13 }}>🖨 พิมพ์รายงาน / บันทึกเป็น PDF</button>
     </div>
 
     <div className="print-only" style={{ marginBottom: 20, borderBottom: '2px solid #111', paddingBottom: 14 }}>

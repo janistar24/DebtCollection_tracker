@@ -4,7 +4,11 @@ import YearSelector from './YearSelector'
 import Modal from './Modal'
 import { CURRENT_YEAR } from '../data/mockData'
 
-const ROLE_LABEL: Record<string, string> = { officer: 'พนักงาน', director: 'ผู้บริหาร', admin: 'แอดมิน' }
+const ROLE_LABEL: Record<string, string> = {
+  officer: 'เจ้าหน้าที่ผู้รับผิดชอบ',
+  director: 'ผู้บริหาร',
+  admin: 'ผู้ดูแลระบบ',
+}
 const PAGE_TITLES: Record<string, string> = {
   '/dashboard': 'หน้าหลัก',
   '/taxpayers': 'รายละเอียดผู้ชำระภาษี (กค.)',

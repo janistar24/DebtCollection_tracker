@@ -126,8 +126,10 @@ export default function TaxpayerListPage() {
     return true
   }
 
+  // สถานะเปิดรอบเป็นสถานะระดับปี ไม่ใช่ระดับกลุ่มที่กำลังกรอง
+  // หากปีเปิดแล้วแต่กลุ่มที่เลือกไม่มีข้อมูล ให้คงหน้าตารางและแสดง EmptyState
   const hasSelectedYearData = taxpayers.some(tp =>
-    visibleForYear(tp) && tp.assessments.some(a => a.year === selectedYear)
+    tp.assessments.some(a => a.year === selectedYear)
   )
 
   const sourceYear = selectedYear - 1
@@ -889,7 +891,13 @@ const handleInlineAdd = async () => {
           รายละเอียดผู้ชำระภาษีที่ดินและสิ่งปลูกสร้าง-ภาษีป้าย_{selectedYear}_{tableGroupLabel}
         </div>
         {filtered.length === 0 && !editMode ? (
-          <EmptyState icon="🔍" title="ไม่พบข้อมูล" sub="ลองเปลี่ยนเงื่อนไขการค้นหา" />
+          <EmptyState
+            icon="🔍"
+            title="ไม่พบข้อมูลผู้เสียภาษี"
+            sub={groupFilter !== 'all'
+              ? `ไม่พบข้อมูลในกลุ่ม ${groupFilter} สำหรับปีภาษี ${selectedYear} กรุณาเลือกกลุ่มอื่น`
+              : 'ไม่พบข้อมูลตามเงื่อนไขที่ระบุ กรุณาปรับตัวกรองแล้วลองอีกครั้ง'}
+          />
         ) : (
           <div className="annual-table-wrap" style={{ overflowX: 'auto' }}>
             <table className="annual-taxpayer-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>

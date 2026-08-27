@@ -1,17 +1,18 @@
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { AppProvider, useApp } from './context/AppContext'
 import Sidebar from './components/Sidebar'
 import Header from './components/Header'
-import LoginPage from './pages/LoginPage'
-import DashboardPage from './pages/DashboardPage'
-import TaxpayerListPage from './pages/TaxpayerListPage'
-import AddTaxpayerPage from './pages/AddTaxpayerPage'
-import TaxpayerDetailPage from './pages/TaxpayerDetailPage'
-import ReportPage from './pages/ReportPage'
-import AdminUsersPage from './pages/AdminUsersPage'
-import SearchPaymentPage from './pages/SearchPaymentPage'
-import ManageTaxpayersPage from './pages/ManageTaxPayersPage'
+
+const LoginPage = lazy(() => import('./pages/LoginPage'))
+const DashboardPage = lazy(() => import('./pages/DashboardPage'))
+const TaxpayerListPage = lazy(() => import('./pages/TaxpayerListPage'))
+const AddTaxpayerPage = lazy(() => import('./pages/AddTaxpayerPage'))
+const TaxpayerDetailPage = lazy(() => import('./pages/TaxpayerDetailPage'))
+const ReportPage = lazy(() => import('./pages/ReportPage'))
+const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'))
+const SearchPaymentPage = lazy(() => import('./pages/SearchPaymentPage'))
+const ManageTaxpayersPage = lazy(() => import('./pages/ManageTaxPayersPage'))
 
 function ProtectedLayout() {
   const { currentUser } = useApp()
@@ -63,7 +64,9 @@ export default function App() {
   return (
     <AppProvider>
       <HashRouter>
-        <AppRoutes />
+        <Suspense fallback={<div style={{ padding: 32, textAlign: 'center', color: '#6b5b95' }}>กำลังโหลดข้อมูล...</div>}>
+          <AppRoutes />
+        </Suspense>
       </HashRouter>
     </AppProvider>
   )

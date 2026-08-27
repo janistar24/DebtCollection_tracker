@@ -2,6 +2,8 @@ import type { User, UserRole, Group } from '../types'
 
 interface LoginResponse {
   success: boolean
+  access_token: string
+  token_type: 'bearer'
   user: {
   id: string
   code: string
@@ -45,12 +47,47 @@ export async function login(
 
   const result = (await response.json()) as LoginResponse
 
-  return {
+  const user: User = {
     id: result.user.id,
     code: result.user.code,
     name: result.user.name,
     role: result.user.role.toLowerCase() as UserRole,
     group: result.user.group ?? undefined,
     active: result.user.active,
+  }
+  localStorage.setItem('tax_access_token', result.access_token)
+  localStorage.setItem('tax_current_user', JSON.stringify(user))
+  return user
+}
+
+export function getStoredUser(): User | null {
+  try {
+    const value = localStorage.getItem('tax_current_user')
+    return value ? JSON.parse(value) as User : null
+  } catch {
+    return null
+  }
+}
+
+export function clearAuthSession() {
+  localStorage.removeItem('tax_access_token')
+  localStorage.removeItem('tax_current_user')
+}
+
+export function installAuthenticatedFetch() {
+  const originalFetch = window.fetch.bind(window)
+  window.fetch = async (input: RequestInfo | URL, init: RequestInit = {}) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+    const token = localStorage.getItem('tax_access_token')
+    const headers = new Headers(init.headers ?? (input instanceof Request ? input.headers : undefined))
+    if (token && url.includes('/api/') && !url.endsWith('/api/login')) {
+      headers.set('Authorization', `Bearer ${token}`)
+    }
+    const response = await originalFetch(input, { ...init, headers })
+    if (response.status === 401 && !url.endsWith('/api/login')) {
+      clearAuthSession()
+      window.location.hash = '#/login'
+    }
+    return response
   }
 }

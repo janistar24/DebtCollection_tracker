@@ -17,7 +17,7 @@ const STATUS_MAP: Record<string, { label: string; bg: string; color: string; dot
   inactive:   { label: 'ปิดการใช้งาน',bg: '#f4f4f8', color: '#888', dot: '#aaa' },
   officer:    { label: 'พนักงาน',      bg: '#e8eef8', color: '#3a5fbf', dot: '#3a5fbf' },
   director:   { label: 'ผู้บริหาร',    bg: '#f0ecfb', color: '#7c5cbf', dot: '#9b7dd4' },
-  admin:      { label: 'แอดมิน',       bg: '#fff1f0', color: '#c0392b', dot: '#e74c3c' },
+  admin:      { label: 'ผู้ดูแลระบบ',   bg: '#fff1f0', color: '#c0392b', dot: '#e74c3c' },
 }
 
 export default function StatusBadge({ status, size = 'md' }: Props) {

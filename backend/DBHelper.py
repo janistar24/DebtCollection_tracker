@@ -22,6 +22,8 @@ class DBHelper:
         self.min_pool_size = max(1, int(os.getenv("DB_POOL_MIN", "1")))
         self.max_pool_size = max(self.min_pool_size, int(os.getenv("DB_POOL_MAX", "8")))
         self.pool_timeout = float(os.getenv("DB_POOL_TIMEOUT", "15"))
+        self.connect_timeout = max(1, int(os.getenv("DB_CONNECT_TIMEOUT", "10")))
+        self.statement_timeout_ms = max(1000, int(os.getenv("DB_STATEMENT_TIMEOUT_MS", "30000")))
         self._pool: LifoQueue[psycopg.Connection] = LifoQueue(maxsize=self.max_pool_size)
         self._pool_lock = Lock()
         self._connection_count = 0
@@ -37,7 +39,13 @@ class DBHelper:
             user=self.user,
             password=self.password,
             dbname=self.db,
-            connect_timeout=10,
+            connect_timeout=self.connect_timeout,
+            options=f"-c statement_timeout={self.statement_timeout_ms} -c timezone=UTC",
+            application_name="debt_collection_api",
+            keepalives=1,
+            keepalives_idle=30,
+            keepalives_interval=10,
+            keepalives_count=3,
         )
 
     def _acquire(self) -> psycopg.Connection:

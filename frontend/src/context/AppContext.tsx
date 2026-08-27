@@ -7,7 +7,7 @@ import {
   type ReactNode,
 } from 'react'
 
-import { login as apiLogin } from '../api/auth'
+import { clearAuthSession, getStoredUser, login as apiLogin } from '../api/auth'
 import { getAllocatedPayments } from '../api/payments'
 import { getFollowUpLogs } from '../api/follow_up_logs'
 import { getTaxAssessments } from '../api/tax_assessments'
@@ -43,7 +43,7 @@ function pushToMap<T>(map: Map<string, T[]>, key: string, value: T) {
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [currentUser, setCurrentUser] = useState<User | null>(null)
+  const [currentUser, setCurrentUser] = useState<User | null>(() => getStoredUser())
   const [users, setUsers] = useState<User[]>([])
   const [taxpayers, setTaxpayers] = useState<Taxpayer[]>([])
   const [selectedYear, setSelectedYearState] = useState(CURRENT_YEAR)
@@ -128,6 +128,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }
 
   const logout = () => {
+    clearAuthSession()
     setCurrentUser(null)
     setUsers([])
     setTaxpayers([])

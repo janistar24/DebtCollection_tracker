@@ -1,4 +1,6 @@
 import json
+import logging
+import os
 import subprocess
 import traceback
 from datetime import date, datetime
@@ -20,12 +22,23 @@ from follow_up_logs import Follow_up_logs
 from taxpayer_year_records import Taxpayer_year_records
 from payment_allocations import Payment_allocations
 from slip_ocr import read_slip
+from auth_security import authenticated_user, create_access_token
 
 app = FastAPI(
     title="Tax Collection API",
     version="1.0.0",
     default_response_class=JSONResponse
 )
+
+logger = logging.getLogger("tax_collection_api")
+allowed_origins = [
+    origin.strip()
+    for origin in os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:8443,http://127.0.0.1:8443,http://localhost:5173,http://127.0.0.1:5173",
+    ).split(",")
+    if origin.strip()
+]
 
 db = DBHelper()
 
@@ -41,16 +54,31 @@ password_hash = PasswordHash.recommended()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:8443",
-        "http://127.0.0.1:8443",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173"
-    ],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"]
 )
+
+PUBLIC_PATHS = {"/", "/api/login", "/docs", "/openapi.json", "/redoc"}
+
+@app.middleware("http")
+async def enforce_authentication(request: Request, call_next):
+    if request.method == "OPTIONS" or request.url.path in PUBLIC_PATHS:
+        return await call_next(request)
+    if request.url.path.startswith("/api/"):
+        try:
+            user = authenticated_user(request)
+            request.state.user = user
+            if request.url.path == "/api/database-test" and user["role"] != "ADMIN":
+                raise HTTPException(status_code=403, detail="ไม่มีสิทธิ์เข้าถึงข้อมูลส่วนนี้")
+            if request.url.path.startswith("/api/users") and request.method != "GET" and user["role"] != "ADMIN":
+                raise HTTPException(status_code=403, detail="เฉพาะผู้ดูแลระบบเท่านั้น")
+            if request.method in {"POST", "PUT", "PATCH", "DELETE"} and user["role"] == "DIRECTOR":
+                raise HTTPException(status_code=403, detail="บัญชีผู้บริหารมีสิทธิ์ดูข้อมูลเท่านั้น")
+        except HTTPException as error:
+            return JSONResponse(status_code=error.status_code, content={"detail": error.detail})
+    return await call_next(request)
 
 @app.middleware("http")
 async def add_utf8_charset(request, call_next):
@@ -66,6 +94,11 @@ def home():
     return {
         "message": "Tax Collection Backend Running"
     }
+
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
 
 @app.get("/api/database-test")
 def database_test():
@@ -171,8 +204,8 @@ def create_admin_user(request: AdminUserCreate):
         raise HTTPException(status_code=400, detail="สิทธิ์ผู้ใช้งานไม่ถูกต้อง")
     if role == "OFFICER" and not request.group_code:
         raise HTTPException(status_code=400, detail="กรุณาเลือกกลุ่มรับผิดชอบ")
-    if len(request.password) < 6:
-        raise HTTPException(status_code=400, detail="รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร")
+    if len(request.password) < 12:
+        raise HTTPException(status_code=400, detail="รหัสผ่านต้องมีอย่างน้อย 12 ตัวอักษร")
     try:
         with db.transaction() as cursor:
             cursor.execute(
@@ -203,8 +236,8 @@ def update_admin_user(user_id: int, request: AdminUserUpdate):
         raise HTTPException(status_code=400, detail="สิทธิ์ผู้ใช้งานไม่ถูกต้อง")
     if role == "OFFICER" and not request.group_code:
         raise HTTPException(status_code=400, detail="กรุณาเลือกกลุ่มรับผิดชอบ")
-    if request.password and len(request.password) < 6:
-        raise HTTPException(status_code=400, detail="รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร")
+    if request.password and len(request.password) < 12:
+        raise HTTPException(status_code=400, detail="รหัสผ่านต้องมีอย่างน้อย 12 ตัวอักษร")
     try:
         with db.transaction() as cursor:
             cursor.execute("SELECT user_id FROM public.users WHERE user_id=%s", (user_id,))
@@ -651,6 +684,8 @@ def login(request: LoginRequest):
 
     return {
         "success": True,
+        "access_token": create_access_token(user),
+        "token_type": "bearer",
         "user": {
             "id": str(user["user_id"]),
             "code": user["employee_code"],

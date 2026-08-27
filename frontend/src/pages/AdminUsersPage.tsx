@@ -7,7 +7,7 @@ import type { User } from '../types'
 import { createUser, setUserActive, updateUserRecord } from '../api/users'
 
 const GROUPS = ['ก-น', 'บ-ล', 'ส-ศ', 'ว-ฮ และบริษัท']
-const ROLE_MAP: Record<string, string> = { officer: 'พนักงาน', director: 'ผู้บริหาร', admin: 'แอดมิน' }
+const ROLE_MAP: Record<string, string> = { officer: 'เจ้าหน้าที่ผู้รับผิดชอบ', director: 'ผู้บริหาร', admin: 'ผู้ดูแลระบบ' }
 
 export default function AdminUsersPage() {
   const { users, addUser, updateUser } = useApp()
@@ -33,7 +33,7 @@ export default function AdminUsersPage() {
     const firstName = parts.shift() ?? ''
     const lastName = parts.join(' ')
     if (!firstName || !lastName) return alert('กรุณากรอกชื่อและนามสกุล')
-    if (!editUser && form.password.length < 6) return alert('รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร')
+    if (!editUser && form.password.length < 12) return alert('รหัสผ่านต้องมีอย่างน้อย 12 ตัวอักษร')
     const payload = {
       employee_code: form.code.trim(), first_name: firstName, last_name: lastName,
       username: form.username.trim(), password: form.password || undefined,
@@ -140,7 +140,7 @@ export default function AdminUsersPage() {
                   </div>
                   <div>
                     <label style={LBL}>{editUser ? 'รหัสผ่านใหม่ (ไม่เปลี่ยนให้เว้นว่าง)' : 'รหัสผ่าน *'}</label>
-                    <input className="input-field" type="password" placeholder="อย่างน้อย 6 ตัวอักษร" value={form.password}
+                    <input className="input-field" type="password" placeholder="อย่างน้อย 12 ตัวอักษร" value={form.password}
                       onChange={e => setForm(f => ({ ...f, password: e.target.value }))} />
                   </div>
                 </div>
@@ -148,9 +148,9 @@ export default function AdminUsersPage() {
                   <div>
                     <label style={LBL}>สิทธิ์ (Role)</label>
                     <select className="input-field" value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}>
-                      <option value="officer">พนักงาน</option>
+                      <option value="officer">เจ้าหน้าที่ผู้รับผิดชอบ</option>
                       <option value="director">ผู้บริหาร</option>
-                      <option value="admin">แอดมิน</option>
+                      <option value="admin">ผู้ดูแลระบบ</option>
                     </select>
                   </div>
                   {form.role === 'officer' && (
@@ -165,7 +165,7 @@ export default function AdminUsersPage() {
               </div>
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 24 }}>
                 <button className="btn-secondary" onClick={() => setShowModal(false)}>ยกเลิก</button>
-                <button className="btn-primary" onClick={handleSave} disabled={saving || !form.code || !form.name || !form.username || (!editUser && form.password.length < 6)}>
+                <button className="btn-primary" onClick={handleSave} disabled={saving || !form.code || !form.name || !form.username || (!editUser && form.password.length < 12)}>
                   {saving ? '⏳...' : '💾 บันทึก'}
                 </button>
               </div>
