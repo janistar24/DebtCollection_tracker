@@ -1,3 +1,5 @@
 .env
 node_modules/
 .Ds_Store
+taxpayerslist_cleandata.csv
+taxpayerslist_cleandata.xlsx

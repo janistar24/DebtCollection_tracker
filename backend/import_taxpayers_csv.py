@@ -104,7 +104,7 @@ def read_rows(csv_path: Path) -> list[ImportRow]:
             raise ValueError("ไม่พบคอลัมน์: " + ", ".join(missing))
 
         rows: list[ImportRow] = []
-        owner_code_rows: dict[str, int] = {}
+        taxpayer_rows: dict[tuple[str, str, str], int] = {}
         for row_number, raw in enumerate(reader, start=2):
             if not any(clean_text(value) for value in raw.values()):
                 continue
@@ -118,11 +118,13 @@ def read_rows(csv_path: Path) -> list[ImportRow]:
                 raise ValueError(f"แถว {row_number}: กรุณากรอก surname")
             if not owner_code:
                 raise ValueError(f"แถว {row_number}: กรุณากรอก ownercode")
-            if owner_code in owner_code_rows:
+            taxpayer_key = (name.casefold(), surname.casefold(), owner_code)
+            if taxpayer_key in taxpayer_rows:
                 raise ValueError(
-                    f"แถว {row_number}: ownercode ซ้ำกับแถว {owner_code_rows[owner_code]}"
+                    f"แถว {row_number}: ผู้เสียภาษีซ้ำกับแถว {taxpayer_rows[taxpayer_key]} "
+                    "(ชื่อ นามสกุล และ ownercode ตรงกันทั้งหมด)"
                 )
-            owner_code_rows[owner_code] = row_number
+            taxpayer_rows[taxpayer_key] = row_number
 
             land_amount = parse_money(row_value(raw, "landtax_amount"), "landtax_amount", row_number)
             land_change = parse_money(
@@ -228,71 +230,186 @@ def import_rows(
                 cursor.execute("SELECT 1 FROM public.users WHERE user_id=%s", (user_id,))
                 if cursor.fetchone() is None:
                     raise ValueError(f"ไม่พบผู้ใช้งาน user_id={user_id}")
+            print("กำลังส่งข้อมูลขึ้นฐานข้อมูล...", flush=True)
+            cursor.execute(
+                """
+                CREATE TEMP TABLE import_taxpayers_stage (
+                    row_number INTEGER PRIMARY KEY,
+                    first_name TEXT NOT NULL,
+                    last_name TEXT NOT NULL,
+                    owner_code TEXT NOT NULL,
+                    land_amount NUMERIC(14,2) NOT NULL,
+                    land_change NUMERIC(14,2) NOT NULL,
+                    land_count INTEGER NOT NULL,
+                    sign_amount NUMERIC(14,2) NOT NULL,
+                    sign_change NUMERIC(14,2) NOT NULL,
+                    sign_count INTEGER NOT NULL,
+                    note TEXT
+                ) ON COMMIT DROP
+                """
+            )
+            with cursor.copy(
+                """COPY import_taxpayers_stage (
+                    row_number, first_name, last_name, owner_code,
+                    land_amount, land_change, land_count,
+                    sign_amount, sign_change, sign_count, note
+                ) FROM STDIN"""
+            ) as copy:
+                for item in rows:
+                    copy.write_row(
+                        (
+                            item.row_number,
+                            item.name,
+                            item.surname,
+                            item.owner_code,
+                            item.land_amount,
+                            item.land_change,
+                            item.land_count,
+                            item.sign_amount,
+                            item.sign_change,
+                            item.sign_count,
+                            item.note,
+                        )
+                    )
 
-            for item in rows:
-                cursor.execute(
-                    """SELECT taxpayer_id FROM public.taxpayers
-                       WHERE regexp_replace(COALESCE(owner_code,''),'\\s','','g')=%s
-                       ORDER BY taxpayer_id""",
-                    (item.owner_code,),
+            cursor.execute(
+                """
+                SELECT s.row_number
+                FROM import_taxpayers_stage s
+                JOIN public.taxpayers t
+                  ON regexp_replace(COALESCE(t.owner_code,''),'\\s','','g') = s.owner_code
+                 AND lower(trim(COALESCE(t.first_name,''))) = lower(trim(s.first_name))
+                 AND lower(trim(COALESCE(t.last_name,''))) = lower(trim(s.last_name))
+                GROUP BY s.row_number
+                HAVING COUNT(*) > 1
+                ORDER BY s.row_number
+                LIMIT 1
+                """
+            )
+            duplicate = cursor.fetchone()
+            if duplicate:
+                raise ValueError(
+                    f"แถว {duplicate[0]}: พบชื่อ นามสกุล และ ownercode "
+                    "เดียวกันหลายรายการในฐานข้อมูล"
                 )
-                matches = cursor.fetchall()
-                if len(matches) > 1:
-                    raise ValueError(
-                        f"แถว {item.row_number}: ownercode ตรงกับหลายรายการในฐานข้อมูล"
-                    )
-                if matches:
-                    taxpayer_id = matches[0][0]
-                    cursor.execute(
-                        """UPDATE public.taxpayers SET
-                               first_name=%s,last_name=%s,group_code=%s,
-                               taxpayer_type='INDIVIDUAL',is_active=TRUE,
-                               owner_code=%s,updated_at=CURRENT_TIMESTAMP
-                           WHERE taxpayer_id=%s""",
-                        (item.name, item.surname, group_code, item.owner_code, taxpayer_id),
-                    )
-                else:
-                    cursor.execute(
-                        """INSERT INTO public.taxpayers
-                           (taxpayer_type,owner_code,first_name,last_name,group_code,is_active)
-                           VALUES ('INDIVIDUAL',%s,%s,%s,%s,TRUE)
-                           RETURNING taxpayer_id""",
-                        (item.owner_code, item.name, item.surname, group_code),
-                    )
-                    taxpayer_id = cursor.fetchone()[0]
 
-                cursor.execute(
-                    """INSERT INTO public.taxpayer_year_records
-                       (taxpayer_id,tax_year,note,is_included,added_by)
-                       VALUES (%s,%s,%s,TRUE,%s)
-                       ON CONFLICT (taxpayer_id,tax_year) DO UPDATE SET
-                           note=EXCLUDED.note,is_included=TRUE,
-                           updated_at=CURRENT_TIMESTAMP
-                       RETURNING year_record_id""",
-                    (taxpayer_id, tax_year, item.note, user_id),
+            print("กำลังบันทึกข้อมูลผู้เสียภาษี...", flush=True)
+            cursor.execute(
+                """
+                UPDATE public.taxpayers t
+                SET first_name = s.first_name,
+                    last_name = s.last_name,
+                    owner_code = s.owner_code,
+                    group_code = %s,
+                    taxpayer_type = 'INDIVIDUAL',
+                    is_active = TRUE,
+                    updated_at = CURRENT_TIMESTAMP
+                FROM import_taxpayers_stage s
+                WHERE regexp_replace(COALESCE(t.owner_code,''),'\\s','','g') = s.owner_code
+                  AND lower(trim(COALESCE(t.first_name,''))) = lower(trim(s.first_name))
+                  AND lower(trim(COALESCE(t.last_name,''))) = lower(trim(s.last_name))
+                """,
+                (group_code,),
+            )
+            cursor.execute(
+                """
+                INSERT INTO public.taxpayers (
+                    taxpayer_type, owner_code, first_name, last_name,
+                    group_code, is_active
                 )
-                year_record_id = cursor.fetchone()[0]
+                SELECT 'INDIVIDUAL', s.owner_code, s.first_name, s.last_name, %s, TRUE
+                FROM import_taxpayers_stage s
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM public.taxpayers t
+                    WHERE regexp_replace(COALESCE(t.owner_code,''),'\\s','','g') = s.owner_code
+                      AND lower(trim(COALESCE(t.first_name,''))) = lower(trim(s.first_name))
+                      AND lower(trim(COALESCE(t.last_name,''))) = lower(trim(s.last_name))
+                )
+                """,
+                (group_code,),
+            )
 
-                if item.land_amount > 0 or item.land_change != 0 or item.land_count > 0:
-                    upsert_assessment(
-                        cursor,
-                        year_record_id=year_record_id,
-                        tax_type="LAND_BUILDING",
-                        amount=item.land_amount,
-                        change=item.land_change,
-                        adjustment_count=item.land_count,
-                        user_id=user_id,
-                    )
-                if item.sign_amount > 0 or item.sign_change != 0 or item.sign_count > 0:
-                    upsert_assessment(
-                        cursor,
-                        year_record_id=year_record_id,
-                        tax_type="SIGN",
-                        amount=item.sign_amount,
-                        change=item.sign_change,
-                        adjustment_count=item.sign_count,
-                        user_id=user_id,
-                    )
+            print("กำลังบันทึกข้อมูลปีภาษี...", flush=True)
+            cursor.execute(
+                """
+                INSERT INTO public.taxpayer_year_records (
+                    taxpayer_id, tax_year, note, is_included, added_by
+                )
+                SELECT t.taxpayer_id, %s, s.note, TRUE, %s
+                FROM import_taxpayers_stage s
+                JOIN public.taxpayers t
+                  ON regexp_replace(COALESCE(t.owner_code,''),'\\s','','g') = s.owner_code
+                 AND lower(trim(COALESCE(t.first_name,''))) = lower(trim(s.first_name))
+                 AND lower(trim(COALESCE(t.last_name,''))) = lower(trim(s.last_name))
+                ON CONFLICT (taxpayer_id, tax_year) DO UPDATE SET
+                    note = EXCLUDED.note,
+                    is_included = TRUE,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (tax_year, user_id),
+            )
+
+            print("กำลังบันทึกยอดประเมินภาษี...", flush=True)
+            cursor.execute(
+                """
+                INSERT INTO public.tax_assessments (
+                    year_record_id, tax_type, assessed_amount, previous_amount,
+                    adjustment_count, change_reason, created_by, updated_by
+                )
+                SELECT
+                    yr.year_record_id,
+                    assessment.tax_type,
+                    assessment.amount,
+                    assessment.amount - assessment.change_amount,
+                    assessment.adjustment_count,
+                    'นำเข้า CSV: เพิ่ม/ลด ' ||
+                        to_char(assessment.change_amount, 'FM999999999999990.00'),
+                    %s,
+                    %s
+                FROM import_taxpayers_stage s
+                JOIN public.taxpayers t
+                  ON regexp_replace(COALESCE(t.owner_code,''),'\\s','','g') = s.owner_code
+                 AND lower(trim(COALESCE(t.first_name,''))) = lower(trim(s.first_name))
+                 AND lower(trim(COALESCE(t.last_name,''))) = lower(trim(s.last_name))
+                JOIN public.taxpayer_year_records yr
+                  ON yr.taxpayer_id = t.taxpayer_id
+                 AND yr.tax_year = %s
+                CROSS JOIN LATERAL (
+                    VALUES
+                        ('LAND_BUILDING', s.land_amount, s.land_change, s.land_count),
+                        ('SIGN', s.sign_amount, s.sign_change, s.sign_count)
+                ) AS assessment(tax_type, amount, change_amount, adjustment_count)
+                WHERE assessment.amount > 0
+                   OR assessment.change_amount <> 0
+                   OR assessment.adjustment_count > 0
+                ON CONFLICT (year_record_id, tax_type) DO UPDATE SET
+                    previous_amount = EXCLUDED.previous_amount,
+                    assessed_amount = EXCLUDED.assessed_amount,
+                    adjustment_count = EXCLUDED.adjustment_count,
+                    change_reason = EXCLUDED.change_reason,
+                    updated_by = EXCLUDED.updated_by,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (user_id, user_id, tax_year),
+            )
+
+            cursor.execute(
+                """
+                SELECT COUNT(DISTINCT t.taxpayer_id)
+                FROM import_taxpayers_stage s
+                JOIN public.taxpayers t
+                  ON regexp_replace(COALESCE(t.owner_code,''),'\\s','','g') = s.owner_code
+                 AND lower(trim(COALESCE(t.first_name,''))) = lower(trim(s.first_name))
+                 AND lower(trim(COALESCE(t.last_name,''))) = lower(trim(s.last_name))
+                """
+            )
+            mapped_count = cursor.fetchone()[0]
+            if mapped_count != len(rows):
+                raise RuntimeError(
+                    f"จับคู่ข้อมูลได้ {mapped_count}/{len(rows)} ราย ระบบยกเลิกการนำเข้า"
+                )
+            print("กำลังยืนยันข้อมูลทั้งหมด...", flush=True)
     finally:
         db.close()
 
