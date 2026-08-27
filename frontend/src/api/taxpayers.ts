@@ -1,4 +1,5 @@
 import type { Taxpayer, Group } from '../types'
+import { API_URL } from './config'
 
 interface TaxpayerApi {
   taxpayer_id: number
@@ -21,9 +22,6 @@ interface TaxpayersResponse {
   count: number
   data: TaxpayerApi[]
 }
-
-const API_URL =
-  import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api'
 
 export async function getTaxpayers(): Promise<Taxpayer[]> {
   const response = await fetch(`${API_URL}/taxpayers`)

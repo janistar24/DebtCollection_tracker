@@ -1,6 +1,5 @@
 import type { FollowUp } from '../types'
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api'
+import { API_URL } from './config'
 
 interface FollowUpApi {
   follow_up_id: number

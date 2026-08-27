@@ -1,4 +1,5 @@
 import type { Taxpayer, Group } from '../types'
+import { API_URL } from './config'
 
 interface TaxAssessmentsApi {
   year_record_id: number
@@ -38,9 +39,6 @@ interface TaxAssessmentsResponse {
 }
 
 // READ ALL
-const API_URL =
-  import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api'
-
 export async function getTaxAssessments(): Promise<TaxAssessment[]> {
   const response = await fetch(`${API_URL}/tax-assessments`)
 

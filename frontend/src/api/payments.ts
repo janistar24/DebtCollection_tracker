@@ -1,6 +1,5 @@
 import type { Payment, PayMethod } from '../types'
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api'
+import { API_URL } from './config'
 
 interface CompletePaymentInput {
   payment_amount: number

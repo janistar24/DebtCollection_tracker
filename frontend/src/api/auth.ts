@@ -1,4 +1,5 @@
 import type { User, UserRole, Group } from '../types'
+import { API_URL } from './config'
 
 interface LoginResponse {
   success: boolean
@@ -13,9 +14,6 @@ interface LoginResponse {
   active: boolean
   }
 }
-
-const API_URL =
-  import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api'
 
 export async function login(
   username: string,
