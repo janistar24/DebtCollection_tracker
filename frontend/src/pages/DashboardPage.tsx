@@ -841,7 +841,7 @@ export default function DashboardPage() {
     {
       step: '④',
       icon: '📊',
-      label: 'ตรวจสอบรายงานประจำวัน',
+      label: 'รายงาน',
       sub: 'ตรวจสอบผลการติดตามและยอดรับชำระ',
       action: () => navigate('/reports'),
     },

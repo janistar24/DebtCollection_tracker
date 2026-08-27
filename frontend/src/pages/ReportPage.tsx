@@ -63,7 +63,7 @@ export default function ReportPage() {
   const groupLabel = groupFilter === 'all' ? 'ทุกกลุ่ม' : `กลุ่ม ${groupFilter}`
   const officer = groupFilter === 'all' ? 'ผู้รับผิดชอบทุกคน' : users.find(user => user.id === filtered[0]?.responsibleOfficer)?.name ?? currentUser?.name ?? '-'
 
-  return <div style={{ padding: 24, maxWidth: 1200 }}>
+  return <div className="report-page" style={{ padding: 24, maxWidth: 1200 }}>
     <div className="glass-card no-print" style={{ padding: '16px 20px', marginBottom: 16, display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
       {isDirector && <Filter label="กลุ่มผู้รับผิดชอบ" value={groupFilter} setValue={setGroupFilter} options={[['all','ทุกกลุ่ม'],...GROUPS.map(g => [g,`กลุ่ม ${g}`])]} />}
       <Filter label="สถานะ" value={statusFilter} setValue={setStatusFilter} options={[['all','ทุกสถานะ'],['unpaid','ยังไม่ชำระ'],['partial','ชำระบางส่วน'],['paid','ชำระครบ']]} />
@@ -73,7 +73,7 @@ export default function ReportPage() {
     </div>
 
     <div className="print-only" style={{ marginBottom: 20, borderBottom: '2px solid #111', paddingBottom: 14 }}>
-      <div style={{ textAlign: 'center', fontSize: 14, fontWeight: 700, color: '#000' }}>เทศบาล / องค์การบริหารส่วนตำบล</div>
+      <div style={{ textAlign: 'center', fontSize: 14, fontWeight: 700, color: '#000' }}>เทศบาลเมืองตาคลี</div>
       <div style={{ textAlign: 'center', fontSize: 17, fontWeight: 800, color: '#000', margin: 6 }}>รายงานสรุปผลการติดตามและจัดเก็บภาษี ประจำปี {selectedYear}</div>
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#333' }}><span>ปีภาษี: <b>{selectedYear}</b> · {groupLabel}</span><span>วันที่ออกรายงาน: <b>{formatDate(today)}</b> · ผู้จัดทำ: <b>{currentUser?.name}</b></span></div>
     </div>
@@ -87,16 +87,27 @@ export default function ReportPage() {
       <Kpi label="ยอดภาษีทั้งหมด" value={`฿${formatCurrency(totalAssessed)}`} color="#2d2545" /><Kpi label="รับชำระแล้ว" value={`฿${formatCurrency(totalPaid)}`} color="#1a8f5a" /><Kpi label="ยอดคงเหลือ" value={`฿${formatCurrency(totalRemaining)}`} color="#c0392b" /><Kpi label="ผู้ที่ยังมียอดค้าง" value={`${partialCount + unpaidCount} ราย`} color="#7c5cbf" />
     </section>
 
-    <section style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.35fr) minmax(300px,.65fr)', gap: 14, marginBottom: 18 }}>
-      <div className="glass-card" style={{ padding: '18px 20px', minWidth: 0 }}>
+    <section className="report-visualizations" style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 14, marginBottom: 18 }}>
+      <div className="glass-card report-monthly-chart" style={{ padding: '18px 20px', minWidth: 0 }}>
         <div style={TITLE}>ยอดรับชำระรายเดือน แยกตามประเภทภาษี</div><div style={SUB}>เปรียบเทียบยอดของภาษีแต่ละประเภทในเดือนเดียวกัน (บาท)</div>
         <div style={{ width: '100%', height: 280 }}><ResponsiveContainer><BarChart data={monthlyPayments} margin={{ top: 8, right: 8, left: 6 }}><CartesianGrid strokeDasharray="3 3" stroke="rgba(180,165,210,.25)" vertical={false} /><XAxis dataKey="month" tick={{ fontSize: 11, fill: '#8873b5' }} tickLine={false} /><YAxis tick={{ fontSize: 11, fill: '#8873b5' }} axisLine={false} tickLine={false} width={62} tickFormatter={value => Number(value).toLocaleString('th-TH')} label={{ value: 'บาท', angle: -90, position: 'insideLeft', fill: '#8873b5', fontSize: 11 }} /><Tooltip formatter={(value, name) => [`฿${formatCurrency(Number(value))}`, name]} contentStyle={{ fontFamily: "'Sarabun',sans-serif", fontSize: 12, borderRadius: 10 }} /><Legend wrapperStyle={{ fontSize: 11 }} /><Bar dataKey="land" name="ภาษีที่ดินและสิ่งปลูกสร้าง" fill="#7c5cbf" radius={[5,5,0,0]} maxBarSize={26} /><Bar dataKey="sign" name="ภาษีป้าย" fill="#b9a6eb" radius={[5,5,0,0]} maxBarSize={26} /></BarChart></ResponsiveContainer></div>
       </div>
-      <div className="glass-card" style={{ padding: '18px 20px', minWidth: 0 }}>
+      <div className="report-bottom-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(300px,1fr) minmax(300px,1fr)', gap: 14 }}>
+      <div className="glass-card report-status-chart" style={{ padding: '18px 20px', minWidth: 0 }}>
         <div style={TITLE}>สถานะการชำระของผู้เสียภาษี</div><div style={SUB}>จำนวนคน แยกตามสถานะปัจจุบัน</div>
         <div style={{ width: '100%', height: 205, position: 'relative' }}><ResponsiveContainer><PieChart><Pie data={statusData} dataKey="value" innerRadius="52%" outerRadius="82%" paddingAngle={2}>{statusData.map(item => <Cell key={item.name} fill={item.color} stroke="none" />)}</Pie><Tooltip formatter={(value, name) => [`${value} ราย`, name]} /></PieChart></ResponsiveContainer><div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', pointerEvents: 'none', fontSize: 15, fontWeight: 700 }}>{filtered.length} ราย</div></div>
         <div style={{ display: 'flex', justifyContent: 'center', gap: 12, flexWrap: 'wrap', fontSize: 11, color: '#6b5b95' }}>{statusData.map(item => <span key={item.name}><i style={{ display: 'inline-block', width: 9, height: 9, borderRadius: 3, background: item.color, marginRight: 5 }} />{item.name} <b>{item.value}</b></span>)}</div>
-        <div style={{ borderTop: '1px solid rgba(200,190,240,.25)', marginTop: 16, paddingTop: 13 }}><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', fontSize: 12 }}><span>มีผู้ชำระเข้ามาเดือนนี้</span><b style={{ color: '#7c5cbf', fontSize: 19 }}>{paidThisMonth} ราย</b></div><div style={{ height: 8, background: '#eee9f8', borderRadius: 99, overflow: 'hidden', marginTop: 7 }}><div style={{ width: `${filtered.length ? paidThisMonth / filtered.length * 100 : 0}%`, height: '100%', background: '#7c5cbf' }} /></div></div>
+      </div>
+      <div className="glass-card report-current-month" style={{ padding: '18px 20px', minWidth: 0 }}>
+        <div style={TITLE}>ผลการจัดเก็บในเดือนปัจจุบัน</div><div style={SUB}>สรุปผู้ชำระภาษีและยอดรับชำระของเดือนนี้</div>
+        <div style={{ minHeight: 205, display: 'grid', placeItems: 'center' }}>
+          <div style={{ width: '100%', maxWidth: 340 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 14 }}><span style={{ color: '#6b5b95', fontSize: 13 }}>ผู้ชำระภาษีในเดือนนี้</span><b style={{ color: '#7c5cbf', fontSize: 24 }}>{paidThisMonth} ราย</b></div>
+            <div style={{ height: 10, background: '#eee9f8', borderRadius: 99, overflow: 'hidden' }}><div style={{ width: `${filtered.length ? paidThisMonth / filtered.length * 100 : 0}%`, height: '100%', background: '#7c5cbf' }} /></div>
+            <div style={{ color: '#a89cc8', fontSize: 11, marginTop: 9, textAlign: 'right' }}>คิดเป็น {filtered.length ? Math.round(paidThisMonth / filtered.length * 100) : 0}% ของผู้เสียภาษีตามเงื่อนไข</div>
+          </div>
+        </div>
+      </div>
       </div>
     </section>
 

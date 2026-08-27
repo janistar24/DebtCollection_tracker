@@ -22,6 +22,7 @@ import { bulkSaveTaxpayerYearRecords } from '../api/taxpayer_year_records'
 import type { Taxpayer } from '../types'
 
 const GROUPS = ['ก-น', 'บ-ล', 'ส-ศ', 'ว-ฮ และบริษัท']
+const PRINT_ROWS_PER_PAGE = 28
 
 function exportExcel(rows: import('../types').Taxpayer[], year: number, group: string) {
   // Build CSV content (Excel-compatible UTF-8 BOM)
@@ -116,6 +117,13 @@ export default function TaxpayerListPage() {
 
   const landTotal = filtered.reduce((s, tp) => s + (getAssessment(tp, selectedYear)?.landAmount ?? 0), 0)
   const signTotal = filtered.reduce((s, tp) => s + (getAssessment(tp, selectedYear)?.signAmount ?? 0), 0)
+  const printPages = useMemo(() => {
+    const pages: Taxpayer[][] = []
+    for (let index = 0; index < filtered.length; index += PRINT_ROWS_PER_PAGE) {
+      pages.push(filtered.slice(index, index + PRINT_ROWS_PER_PAGE))
+    }
+    return pages.length > 0 ? pages : [[]]
+  }, [filtered])
   const tableGroupLabel = isDirector
     ? (groupFilter === 'all' ? 'ทุกกลุ่ม' : groupFilter)
     : (currentUser?.group ?? groupFilter)
@@ -870,8 +878,39 @@ const handleInlineAdd = async () => {
         </div>
       )}
 
-      {/* Print-only document header */}
-      <div className="print-only" style={{ marginBottom: 16, borderBottom: '2px solid #222', paddingBottom: 12 }}>
+      <div className="annual-print-document print-only">
+        {printPages.map((pageRows, pageIndex) => (
+          <section className="annual-print-page" key={`print-page-${pageIndex}`}>
+            <header className="annual-print-header">
+              <div className="annual-print-agency">เทศบาลเมืองตาคลี</div>
+              <div className="annual-print-heading">รายละเอียดผู้ชำระภาษี (กค.)</div>
+              <div className="annual-print-subheading">ประจำปี {selectedYear} {tableGroupLabel !== 'ทุกกลุ่ม' ? `อักษร ${tableGroupLabel}` : '(ทุกกลุ่ม)'}</div>
+              <div className="annual-print-meta"><span>พิมพ์วันที่ {new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })}</span><span>จำนวนทั้งสิ้น {filtered.length} ราย</span></div>
+            </header>
+            <div className="annual-print-table-title">รายละเอียดผู้ชำระภาษีที่ดินและสิ่งปลูกสร้าง-ภาษีป้าย_{selectedYear}_{tableGroupLabel}</div>
+            <table className="annual-print-table">
+              <colgroup><col className="print-col-number" /><col className="print-col-code" /><col className="print-col-name" /><col span={6} className="print-col-tax" /><col className="print-col-note" /><col className="print-col-status" /></colgroup>
+              <thead><tr><th rowSpan={2}>#</th><th rowSpan={2}>รหัส</th><th rowSpan={2}>ชื่อ-นามสกุล / บริษัท</th><th colSpan={3}>ภาษีที่ดินและสิ่งปลูกสร้าง</th><th colSpan={3}>ภาษีป้าย</th><th rowSpan={2}>หมายเหตุ</th><th rowSpan={2}>สถานะ</th></tr><tr><th>ปีนี้</th><th>ปีก่อน</th><th>เพิ่ม/ลด</th><th>ปีนี้</th><th>ปีก่อน</th><th>เพิ่ม/ลด</th></tr></thead>
+              <tbody>{pageRows.map((tp, rowIndex) => {
+                const assessment = getAssessment(tp, selectedYear)
+                const currentLand = assessment?.landAmount ?? 0
+                const currentSign = assessment?.signAmount ?? 0
+                const previousLand = assessment?.prevLandAmount ?? 0
+                const previousSign = assessment?.prevSignAmount ?? 0
+                const status = getPaymentStatus(tp, selectedYear)
+                const statusLabel = status === 'paid' ? 'ชำระครบ' : status === 'partial' ? 'ชำระบางส่วน' : 'ยังไม่ชำระ'
+                const formatDifference = (value: number) => value === 0 ? 'เท่าเดิม' : `${value > 0 ? '+' : ''}${formatCurrency(value)}`
+                return <tr key={`print-${tp.id}`}><td>{pageIndex * PRINT_ROWS_PER_PAGE + rowIndex + 1}</td><td>{tp.ownerCode || '-'}</td><td>{getTaxpayerName(tp)}</td><td className="number-cell">฿{formatCurrency(currentLand)}</td><td className="number-cell">฿{formatCurrency(previousLand)}</td><td className="number-cell">{formatDifference(currentLand - previousLand)}</td><td className="number-cell">฿{formatCurrency(currentSign)}</td><td className="number-cell">฿{formatCurrency(previousSign)}</td><td className="number-cell">{formatDifference(currentSign - previousSign)}</td><td>{tp.notes || '-'}</td><td>{statusLabel}</td></tr>
+              })}</tbody>
+              {pageIndex === printPages.length - 1 && <tfoot><tr><td colSpan={3}>รวม {filtered.length} ราย</td><td className="number-cell">฿{formatCurrency(landTotal)}</td><td colSpan={2}></td><td className="number-cell">฿{formatCurrency(signTotal)}</td><td colSpan={2}></td><td className="number-cell">฿{formatCurrency(landTotal + signTotal)}</td><td></td></tr></tfoot>}
+            </table>
+            <footer className="annual-print-page-number">หน้า {pageIndex + 1} จาก {printPages.length}</footer>
+          </section>
+        ))}
+      </div>
+
+      {/* Legacy screen table header is hidden in print because paginated pages above include their own header. */}
+      <div className="print-only legacy-print-header" style={{ marginBottom: 16, borderBottom: '2px solid #222', paddingBottom: 12 }}>
         <div style={{ textAlign: 'center', fontSize: 15, fontWeight: 700 }}>
           รายละเอียดผู้ชำระภาษี (กค.)
         </div>
@@ -886,7 +925,7 @@ const handleInlineAdd = async () => {
         </div>
       </div>
 
-      <div className="glass-card annual-print-card" style={{ padding: 0, overflow: 'visible' }}>
+      <div className="glass-card annual-print-card annual-screen-table" style={{ padding: 0, overflow: 'visible' }}>
         <div className="annual-table-title" style={{ padding: '16px 18px', fontSize: 18, fontWeight: 700, color: '#5f4796', background: 'linear-gradient(90deg,rgba(240,236,251,.85),rgba(255,255,255,.7))', borderBottom: '1px solid rgba(200,190,240,.25)' }}>
           รายละเอียดผู้ชำระภาษีที่ดินและสิ่งปลูกสร้าง-ภาษีป้าย_{selectedYear}_{tableGroupLabel}
         </div>

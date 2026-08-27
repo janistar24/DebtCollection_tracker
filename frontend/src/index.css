@@ -242,6 +242,154 @@ select.input-field {
     color: #000 !important;
   }
 
+  /* Annual taxpayer printout is explicitly paginated so rows are never clipped. */
+  .annual-screen-table,
+  .legacy-print-header {
+    display: none !important;
+  }
+
+  .annual-print-document {
+    display: block !important;
+    width: 100% !important;
+  }
+
+  .annual-print-page {
+    position: relative;
+    width: 100%;
+    min-height: 282mm;
+    padding-bottom: 9mm;
+    box-sizing: border-box;
+    break-after: page;
+    page-break-after: always;
+    font-family: 'Sarabun', 'Noto Sans Thai', sans-serif !important;
+    color: #000 !important;
+  }
+
+  .annual-print-page:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+
+  .annual-print-header {
+    margin-bottom: 7px;
+    padding-bottom: 6px;
+    border-bottom: 2px solid #222;
+  }
+
+  .annual-print-agency {
+    text-align: center;
+    font-size: 10pt;
+    font-weight: 700;
+  }
+
+  .annual-print-heading {
+    margin-top: 2px;
+    text-align: center;
+    font-size: 12pt;
+    font-weight: 700;
+  }
+
+  .annual-print-subheading {
+    margin-top: 1px;
+    text-align: center;
+    font-size: 9pt;
+  }
+
+  .annual-print-meta {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 5px;
+    font-size: 7pt;
+  }
+
+  .annual-print-table-title {
+    padding: 4px 5px;
+    border: 1px solid #555;
+    border-bottom: 0;
+    font-size: 8pt;
+    font-weight: 700;
+  }
+
+  .annual-print-table {
+    width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse;
+    font-family: 'Sarabun', 'Noto Sans Thai', sans-serif !important;
+    font-size: 6.6pt;
+    line-height: 1.22;
+  }
+
+  .annual-print-table .print-col-number { width: 4%; }
+  .annual-print-table .print-col-code { width: 11%; }
+  .annual-print-table .print-col-name { width: 16%; }
+  .annual-print-table .print-col-tax { width: 8%; }
+  .annual-print-table .print-col-note { width: 12%; }
+  .annual-print-table .print-col-status { width: 9%; }
+
+  .annual-print-table th,
+  .annual-print-table td {
+    padding: 2px;
+    border: 1px solid #777;
+    vertical-align: middle;
+    overflow-wrap: anywhere;
+    word-break: normal;
+    color: #000 !important;
+    background: #fff !important;
+    font-family: 'Sarabun', 'Noto Sans Thai', sans-serif !important;
+    font-size: inherit !important;
+  }
+
+  .annual-print-table th {
+    text-align: center;
+    font-weight: 700;
+  }
+
+  .annual-print-table tbody tr {
+    height: 7.2mm;
+  }
+
+  .annual-print-table .number-cell {
+    text-align: right;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .annual-print-page-number {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    text-align: center;
+    font-size: 7pt;
+  }
+
+  /* Report layout A: monthly chart gets the full row; summaries stay below. */
+  .report-page {
+    width: 100% !important;
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  .report-visualizations {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+  }
+
+  .report-bottom-grid {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 10px !important;
+  }
+
+  .report-monthly-chart,
+  .report-status-chart,
+  .report-current-month {
+    min-width: 0 !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
   .annual-taxpayer-page .annual-print-card {
     width: 100% !important;
     border: 1px solid #000 !important;
@@ -330,5 +478,11 @@ select.input-field {
     text-shadow: none !important;
     -webkit-print-color-adjust: economy;
     print-color-adjust: economy;
+  }
+}
+
+@media (max-width: 760px) {
+  .report-bottom-grid {
+    grid-template-columns: 1fr !important;
   }
 }
