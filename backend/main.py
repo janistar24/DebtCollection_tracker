@@ -2,8 +2,11 @@ import json
 import logging
 import os
 import subprocess
-import traceback
+import uuid
+from collections import defaultdict, deque
 from datetime import date, datetime
+from threading import Lock
+from time import monotonic
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -24,13 +27,19 @@ from payment_allocations import Payment_allocations
 from slip_ocr import read_slip
 from auth_security import authenticated_user, create_access_token
 
+is_production = os.getenv("ENVIRONMENT", "development").lower() == "production"
+
 app = FastAPI(
     title="Tax Collection API",
     version="1.0.0",
-    default_response_class=JSONResponse
+    default_response_class=JSONResponse,
+    docs_url=None if is_production else "/docs",
+    redoc_url=None if is_production else "/redoc",
+    openapi_url=None if is_production else "/openapi.json",
 )
 
 logger = logging.getLogger("tax_collection_api")
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper())
 allowed_origins = [
     origin.strip()
     for origin in os.getenv(
@@ -61,6 +70,123 @@ app.add_middleware(
 )
 
 PUBLIC_PATHS = {"/", "/api/login", "/docs", "/openapi.json", "/redoc"}
+LOGIN_WINDOW_SECONDS = 15 * 60
+LOGIN_MAX_FAILURES = 10
+login_failures: dict[str, deque[float]] = defaultdict(deque)
+login_failures_lock = Lock()
+
+
+def _login_key(request: Request, username: str) -> str:
+    forwarded = request.headers.get("x-forwarded-for", "")
+    client_ip = forwarded.split(",", 1)[0].strip() or (request.client.host if request.client else "unknown")
+    return f"{client_ip}:{username.strip().lower()}"
+
+
+def _check_login_rate_limit(key: str) -> None:
+    now = monotonic()
+    with login_failures_lock:
+        failures = login_failures[key]
+        while failures and now - failures[0] > LOGIN_WINDOW_SECONDS:
+            failures.popleft()
+        if len(failures) >= LOGIN_MAX_FAILURES:
+            raise HTTPException(status_code=429, detail="เข้าสู่ระบบไม่สำเร็จหลายครั้ง กรุณารอ 15 นาที")
+
+
+def _record_login_failure(key: str) -> None:
+    with login_failures_lock:
+        login_failures[key].append(monotonic())
+
+
+def _clear_login_failures(key: str) -> None:
+    with login_failures_lock:
+        login_failures.pop(key, None)
+
+
+def _actor(request: Request) -> dict:
+    user = getattr(request.state, "user", None)
+    if not user:
+        raise HTTPException(status_code=401, detail="กรุณาเข้าสู่ระบบ")
+    return user
+
+
+def _actor_id(request: Request) -> int:
+    return int(_actor(request)["sub"])
+
+
+def _officer_group(request: Request) -> str | None:
+    user = _actor(request)
+    if user.get("role") != "OFFICER":
+        return None
+    group = user.get("group")
+    if not group:
+        raise HTTPException(status_code=403, detail="บัญชีเจ้าหน้าที่ยังไม่ได้กำหนดกลุ่มรับผิดชอบ")
+    return str(group)
+
+
+def _require_group(request: Request, group_code: str | None) -> None:
+    expected = _officer_group(request)
+    if expected is not None and group_code != expected:
+        raise HTTPException(status_code=403, detail="ไม่มีสิทธิ์เข้าถึงข้อมูลของกลุ่มนี้")
+
+
+def _taxpayer_group(taxpayer_id: int) -> str:
+    row, columns = db.fetch_one(
+        "SELECT group_code FROM public.taxpayers WHERE taxpayer_id=%s",
+        (taxpayer_id,),
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="ไม่พบข้อมูลผู้เสียภาษี")
+    return dict(zip(columns, row))["group_code"]
+
+
+def _year_record_group(year_record_id: int) -> str:
+    row, columns = db.fetch_one(
+        """SELECT t.group_code
+           FROM public.taxpayer_year_records tyr
+           JOIN public.taxpayers t ON t.taxpayer_id=tyr.taxpayer_id
+           WHERE tyr.year_record_id=%s""",
+        (year_record_id,),
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="ไม่พบข้อมูลผู้เสียภาษีประจำปี")
+    return dict(zip(columns, row))["group_code"]
+
+
+def _assessment_group(assessment_id: int) -> str:
+    row, columns = db.fetch_one(
+        """SELECT t.group_code
+           FROM public.tax_assessments ta
+           JOIN public.taxpayer_year_records tyr ON tyr.year_record_id=ta.year_record_id
+           JOIN public.taxpayers t ON t.taxpayer_id=tyr.taxpayer_id
+           WHERE ta.assessment_id=%s""",
+        (assessment_id,),
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="ไม่พบข้อมูลการประเมินภาษี")
+    return dict(zip(columns, row))["group_code"]
+
+
+@app.exception_handler(HTTPException)
+async def safe_http_exception_handler(request: Request, error: HTTPException):
+    if error.status_code < 500:
+        return JSONResponse(status_code=error.status_code, content={"detail": error.detail})
+    request_id = uuid.uuid4().hex[:12]
+    logger.exception("Request %s failed: %s %s", request_id, request.method, request.url.path)
+    message = error.detail.get("message") if isinstance(error.detail, dict) else None
+    return JSONResponse(
+        status_code=error.status_code,
+        content={"detail": message or "ระบบขัดข้อง กรุณาลองใหม่อีกครั้ง", "request_id": request_id},
+    )
+
+
+@app.exception_handler(Exception)
+async def safe_unhandled_exception_handler(request: Request, error: Exception):
+    request_id = uuid.uuid4().hex[:12]
+    logger.exception("Unhandled request %s: %s %s", request_id, request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "ระบบขัดข้อง กรุณาลองใหม่อีกครั้ง", "request_id": request_id},
+    )
 
 @app.middleware("http")
 async def enforce_authentication(request: Request, call_next):
@@ -68,7 +194,23 @@ async def enforce_authentication(request: Request, call_next):
         return await call_next(request)
     if request.url.path.startswith("/api/"):
         try:
-            user = authenticated_user(request)
+            token_user = authenticated_user(request)
+            row, columns = db.fetch_one(
+                """SELECT u.user_id,u.role,u.is_active,ra.group_code
+                   FROM public.users u
+                   LEFT JOIN public.responsibility_assignments ra
+                     ON ra.user_id=u.user_id AND ra.is_active=TRUE
+                   WHERE u.user_id=%s""",
+                (int(token_user["sub"]),),
+            )
+            if row is None or not dict(zip(columns, row))["is_active"]:
+                raise HTTPException(status_code=401, detail="บัญชีผู้ใช้งานไม่พร้อมใช้งาน กรุณาเข้าสู่ระบบใหม่")
+            current_user = dict(zip(columns, row))
+            user = {
+                "sub": int(current_user["user_id"]),
+                "role": str(current_user["role"]).upper(),
+                "group": current_user["group_code"],
+            }
             request.state.user = user
             if request.url.path == "/api/database-test" and user["role"] != "ADMIN":
                 raise HTTPException(status_code=403, detail="ไม่มีสิทธิ์เข้าถึงข้อมูลส่วนนี้")
@@ -86,6 +228,14 @@ async def add_utf8_charset(request, call_next):
 
     if response.headers.get("content-type", "").startswith("application/json"):
         response.headers["content-type"] = "application/json; charset=utf-8"
+
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    if is_production:
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store"
 
     return response
 
@@ -130,9 +280,14 @@ def database_test():
         )
 
 @app.get("/api/users")
-def get_users():
+def get_users(request: Request):
     try:
         users = users_service.dump()
+        actor = _actor(request)
+        if actor["role"] == "OFFICER":
+            users = [item for item in users if int(item["user_id"]) == int(actor["sub"])]
+        if actor["role"] != "ADMIN":
+            users = [{key: value for key, value in item.items() if key != "username"} for item in users]
 
         return JSONResponse(
             content=jsonable_encoder({
@@ -298,9 +453,10 @@ def set_admin_user_active(user_id: int, is_active: bool):
         )
 
 @app.get("/api/taxpayers")
-def get_taxpayers():
+def get_taxpayers(request: Request):
     try:
-        taxpayers = taxpayers_service.dump()
+        group = _officer_group(request)
+        taxpayers = taxpayers_service.dump(group)
 
         return {
             "success": True,
@@ -318,9 +474,10 @@ def get_taxpayers():
         )
 
 @app.get("/api/tax-assessments")
-def get_tax_assessments():
+def get_tax_assessments(request: Request):
     try:
-        tax_assessments = tax_assessments_service.dump()
+        group = _officer_group(request)
+        tax_assessments = tax_assessments_service.dump(group)
 
         return {
             "success": True,
@@ -338,9 +495,10 @@ def get_tax_assessments():
         )
 
 @app.get("/api/payments")
-def get_payments():
+def get_payments(request: Request):
     try:
-        payments = payments_service.dump()
+        group = _officer_group(request)
+        payments = payments_service.dump(group)
 
         return {
             "success": True,
@@ -358,9 +516,10 @@ def get_payments():
         )
 
 @app.get("/api/payment-allocations")
-def get_payment_allocations():
+def get_payment_allocations(request: Request):
     try:
-        allocations = payment_allocations_service.dump()
+        group = _officer_group(request)
+        allocations = payment_allocations_service.dump(group)
         return {
             "success": True,
             "count": len(allocations),
@@ -376,9 +535,12 @@ def get_payment_allocations():
         )
 
 @app.get("/api/reports/monthly-payments")
-def get_monthly_payment_report(tax_year: int, group_code: str | None = None):
+def get_monthly_payment_report(request: Request, tax_year: int, group_code: str | None = None):
     """สรุปยอดรับชำระจาก payment_date จริง แยกเดือนและประเภทภาษี"""
     try:
+        officer_group = _officer_group(request)
+        if officer_group is not None:
+            group_code = officer_group
         data, columns = db.fetch(
             """
             SELECT
@@ -445,9 +607,10 @@ async def read_payment_slip(request: Request):
         )
 
 @app.get("/api/follow-up-logs")
-def get_follow_up_logs():
+def get_follow_up_logs(request: Request):
     try:
-        follow_up_logs = follow_up_logs_service.dump()
+        group = _officer_group(request)
+        follow_up_logs = follow_up_logs_service.dump(group)
 
         return {
             "success": True,
@@ -478,7 +641,7 @@ class FollowUpCreate(BaseModel):
     recorded_by: int | None = None
 
 @app.post("/api/follow-up-logs")
-def create_follow_up_log(request: FollowUpCreate):
+def create_follow_up_log(request: FollowUpCreate, http_request: Request):
     """บันทึกผลการติดต่อจริงและผูกกับผู้เสียภาษีในปีภาษีที่เลือก"""
     scope_map = {"LAND": "LAND_BUILDING", "LAND_BUILDING": "LAND_BUILDING", "SIGN": "SIGN", "BOTH": "BOTH"}
     contact_map = {"PHONE": "PHONE", "LINE": "LINE", "IN_PERSON": "OTHER", "LETTER": "OTHER", "OTHER": "OTHER"}
@@ -496,6 +659,9 @@ def create_follow_up_log(request: FollowUpCreate):
         raise HTTPException(status_code=400, detail="ผลการติดต่อไม่ถูกต้อง")
     if request.promise_amount is not None and request.promise_amount < 0:
         raise HTTPException(status_code=400, detail="ยอดนัดชำระต้องไม่ติดลบ")
+
+    _require_group(http_request, _taxpayer_group(request.taxpayer_id))
+    recorded_by = _actor_id(http_request)
 
     try:
         with db.transaction() as cursor:
@@ -517,7 +683,7 @@ def create_follow_up_log(request: FollowUpCreate):
                    RETURNING follow_up_id""",
                 (year_record[0], tax_scope, contact_type, request.contacted_at, result,
                  request.detail, request.promise_date, request.promise_amount,
-                 request.next_follow_date, request.recorded_by),
+                 request.next_follow_date, recorded_by),
             )
             follow_up_id = cursor.fetchone()[0]
         return {"success": True, "message": "บันทึกการติดต่อเรียบร้อยแล้ว", "data": {"follow_up_id": follow_up_id}}
@@ -547,7 +713,7 @@ class CompletePaymentCreate(BaseModel):
     allocations: list[PaymentAllocationInput]
 
 @app.post("/api/payments/complete")
-def create_complete_payment(request: CompletePaymentCreate):
+def create_complete_payment(request: CompletePaymentCreate, http_request: Request):
     """บันทึกยอดชำระและการจัดสรรภาษีทั้งหมดใน transaction เดียว"""
     if request.payment_amount <= 0:
         raise HTTPException(status_code=400, detail="ยอดชำระต้องมากกว่า 0")
@@ -567,21 +733,13 @@ def create_complete_payment(request: CompletePaymentCreate):
             detail="รหัสการประเมินภาษีซ้ำกัน กรุณารีเฟรชข้อมูลแล้วเลือกประเภทภาษีใหม่"
         )
 
+    for assessment_id in assessment_ids:
+        _require_group(http_request, _assessment_group(assessment_id))
+    recorded_by = _actor_id(http_request)
+
     stage = "ตรวจสอบข้อมูลก่อนบันทึก"
     try:
         with db.transaction() as cursor:
-            if request.recorded_by is not None:
-                stage = "ตรวจสอบผู้บันทึก"
-                cursor.execute(
-                    "SELECT user_id FROM public.users WHERE user_id = %s",
-                    (request.recorded_by,)
-                )
-                if cursor.fetchone() is None:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"ไม่พบผู้ใช้งานรหัส {request.recorded_by} กรุณาออกจากระบบแล้วเข้าสู่ระบบใหม่"
-                    )
-
             stage = "ตรวจสอบรายการประเมินภาษี"
             cursor.execute(
                 """SELECT ta.assessment_id,ta.year_record_id,ta.assessed_amount,
@@ -619,7 +777,7 @@ def create_complete_payment(request: CompletePaymentCreate):
                     request.payment_amount, request.payment_date,
                     request.payment_datetime or datetime.now().astimezone(),
                     request.payment_method.upper(), request.reference_no,
-                    request.receipt_no, request.recorded_by
+                    request.receipt_no, recorded_by
                 )
             )
             payment_id = cursor.fetchone()[0]
@@ -629,7 +787,7 @@ def create_complete_payment(request: CompletePaymentCreate):
                 """INSERT INTO public.payment_allocations
                    (payment_id,assessment_id,allocated_amount,matched_by)
                    VALUES (%s,%s,%s,%s)""",
-                [(payment_id, item.assessment_id, item.allocated_amount, request.recorded_by)
+                [(payment_id, item.assessment_id, item.allocated_amount, recorded_by)
                  for item in request.allocations],
             )
 
@@ -641,8 +799,7 @@ def create_complete_payment(request: CompletePaymentCreate):
     except HTTPException:
         raise
     except Exception as error:
-        print(f"[payments/complete] failed at: {stage}")
-        traceback.print_exc()
+        logger.exception("Payment creation failed at stage: %s", stage)
         raise HTTPException(
             status_code=500,
             detail={
@@ -652,11 +809,15 @@ def create_complete_payment(request: CompletePaymentCreate):
         )
 
 @app.post("/api/login")
-def login(request: LoginRequest):
+def login(request: LoginRequest, http_request: Request):
 
-    user = users_service.find_by_username(request.username)
+    key = _login_key(http_request, request.username)
+    _check_login_rate_limit(key)
+
+    user = users_service.find_by_username(request.username.strip())
 
     if user is None:
+        _record_login_failure(key)
         raise HTTPException(
             status_code=401,
             detail="ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง"
@@ -677,11 +838,13 @@ def login(request: LoginRequest):
         password_ok = False
 
     if not password_ok:
+        _record_login_failure(key)
         raise HTTPException(
             status_code=401,
             detail="ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง"
         )
 
+    _clear_login_failures(key)
     return {
         "success": True,
         "access_token": create_access_token(user),
@@ -714,7 +877,7 @@ class CompleteTaxpayerCreate(TaxpayerCreate):
     added_by: int | None = None
 
 @app.post("/api/taxpayers/complete")
-def create_complete_taxpayer(request: CompleteTaxpayerCreate):
+def create_complete_taxpayer(request: CompleteTaxpayerCreate, http_request: Request):
     """สร้าง master, year record และ assessments ใน transaction เดียว"""
     try:
         taxpayer_type = request.taxpayer_type
@@ -746,6 +909,9 @@ def create_complete_taxpayer(request: CompleteTaxpayerCreate):
                 status_code=400,
                 detail="taxpayer_type ต้องเป็น INDIVIDUAL หรือ COMPANY"
             )
+
+        _require_group(http_request, group_code)
+        actor_id = _actor_id(http_request)
 
         with db.transaction() as cursor:
             if owner_code is not None:
@@ -784,7 +950,7 @@ def create_complete_taxpayer(request: CompleteTaxpayerCreate):
                 VALUES (%s, %s, NULL, TRUE, %s)
                 RETURNING year_record_id
                 """,
-                (taxpayer_id, request.tax_year, request.added_by)
+                (taxpayer_id, request.tax_year, actor_id)
             )
             year_record_id = cursor.fetchone()[0]
 
@@ -806,7 +972,7 @@ def create_complete_taxpayer(request: CompleteTaxpayerCreate):
                     VALUES (%s, %s, %s, 0, NULL, NULL, NULL, %s)
                     RETURNING assessment_id
                     """,
-                    (year_record_id, tax_type, amount, request.added_by)
+                    (year_record_id, tax_type, amount, actor_id)
                 )
                 assessment_ids[tax_type] = cursor.fetchone()[0]
 
@@ -831,7 +997,8 @@ def create_complete_taxpayer(request: CompleteTaxpayerCreate):
         )
 
 @app.post("/api/taxpayers")
-def create_taxpayer(request: TaxpayerCreate):
+def create_taxpayer(request: TaxpayerCreate, http_request: Request):
+    _require_group(http_request, request.group_code)
     result = taxpayers_service.create(
         taxpayer_type=request.taxpayer_type,
         owner_code=request.owner_code,
@@ -872,8 +1039,11 @@ class TaxpayerUpdate(BaseModel):
 @app.put("/api/taxpayers/{taxpayer_id}")
 def update_taxpayer(
     taxpayer_id: int,
-    request: TaxpayerUpdate
+    request: TaxpayerUpdate,
+    http_request: Request,
 ):
+    _require_group(http_request, _taxpayer_group(taxpayer_id))
+    _require_group(http_request, request.group_code)
     result = taxpayers_service.update(
         taxpayer_id=taxpayer_id,
         taxpayer_type=request.taxpayer_type,
@@ -900,7 +1070,8 @@ def update_taxpayer(
 
 # ปิดการใช้งานผู้เสียภาษี (ไม่ลบข้อมูลจริง)
 @app.put("/api/taxpayers/{taxpayer_id}/deactivate")
-def deactivate_taxpayer(taxpayer_id: int):
+def deactivate_taxpayer(taxpayer_id: int, request: Request):
+    _require_group(request, _taxpayer_group(taxpayer_id))
     result = taxpayers_service.deactivate(
         taxpayer_id
     )
@@ -917,14 +1088,16 @@ def deactivate_taxpayer(taxpayer_id: int):
     }
 
 @app.put("/api/taxpayers/{taxpayer_id}/reactivate")
-def reactivate_taxpayer(taxpayer_id: int):
+def reactivate_taxpayer(taxpayer_id: int, request: Request):
+    _require_group(request, _taxpayer_group(taxpayer_id))
     result = taxpayers_service.reactivate(taxpayer_id)
     if result["Is Error"]:
         raise HTTPException(status_code=404, detail=result["Error Message"])
     return {"success": True, "message": "เปิดใช้งานผู้เสียภาษีเรียบร้อยแล้ว"}
 
 @app.delete("/api/taxpayers/{taxpayer_id}")
-def delete_taxpayer(taxpayer_id: int):
+def delete_taxpayer(taxpayer_id: int, request: Request):
+    _require_group(request, _taxpayer_group(taxpayer_id))
     result = taxpayers_service.delete(taxpayer_id)
     if result["Is Error"]:
         raise HTTPException(status_code=409, detail=result["Error Message"])
@@ -959,10 +1132,23 @@ class AnnualBulkSave(BaseModel):
     items: list[AnnualBulkItem]
 
 @app.post("/api/taxpayer-year-records/bulk-save")
-def bulk_save_taxpayer_year_records(request: AnnualBulkSave):
+def bulk_save_taxpayer_year_records(request: AnnualBulkSave, http_request: Request):
     """บันทึกเพิ่ม/นำออก/ยอดประเมิน/หมายเหตุด้วย bulk upsert ชุดเดียว"""
     if not request.items:
         return {"success": True, "data": []}
+
+    officer_group = _officer_group(http_request)
+    if officer_group is not None:
+        taxpayer_ids = list({item.taxpayer_id for item in request.items})
+        rows, _ = db.fetch(
+            """SELECT taxpayer_id FROM public.taxpayers
+               WHERE taxpayer_id = ANY(%s) AND group_code=%s""",
+            (taxpayer_ids, officer_group),
+        )
+        allowed_ids = {int(row[0]) for row in rows}
+        if allowed_ids != set(taxpayer_ids):
+            raise HTTPException(status_code=403, detail="มีรายการผู้เสียภาษีที่อยู่นอกกลุ่มรับผิดชอบ")
+    actor_id = _actor_id(http_request)
 
     payload = json.dumps(
         [item.model_dump() for item in request.items],
@@ -1060,8 +1246,8 @@ def bulk_save_taxpayer_year_records(request: AnnualBulkSave):
                     ON ai.year_record_id = sy.year_record_id
                 ORDER BY sy.taxpayer_id
                 """,
-                (payload, request.tax_year, request.user_id,
-                 request.user_id, request.user_id),
+                (payload, request.tax_year, actor_id,
+                 actor_id, actor_id),
             )
             rows = cursor.fetchall()
             results = [
@@ -1081,9 +1267,10 @@ def bulk_save_taxpayer_year_records(request: AnnualBulkSave):
         raise HTTPException(status_code=500, detail={"message": "บันทึกข้อมูลรายปีแบบชุดไม่สำเร็จ", "error": str(error)})
 
 @app.get("/api/taxpayer-year-records/by-taxpayer/{taxpayer_id}/{tax_year}")
-def get_taxpayer_year_record_by_taxpayer(taxpayer_id: int, tax_year: int):
+def get_taxpayer_year_record_by_taxpayer(taxpayer_id: int, tax_year: int, request: Request):
     """อ่านข้อมูลเดิมได้แม้ record ถูกนำออกจากปีภาษีแล้ว"""
     try:
+        _require_group(request, _taxpayer_group(taxpayer_id))
         data, columns = db.fetch(
             """
             SELECT
@@ -1122,15 +1309,18 @@ def get_taxpayer_year_record_by_taxpayer(taxpayer_id: int, tax_year: int):
 
 @app.post("/api/taxpayer-year-records")
 def create_taxpayer_year_record(
-    request: TaxpayerYearRecordCreate
+    request: TaxpayerYearRecordCreate,
+    http_request: Request,
 ):
     try:
+
+        _require_group(http_request, _taxpayer_group(request.taxpayer_id))
 
         result = taxpayer_year_records_service.create(
             taxpayer_id=request.taxpayer_id,
             tax_year=request.tax_year,
             note=request.note,
-            added_by=request.added_by
+            added_by=_actor_id(http_request)
         )
 
         if result["Is Error"]:
@@ -1193,9 +1383,11 @@ def create_taxpayer_year_record(
 @app.put("/api/taxpayer-year-records/{year_record_id}")
 def update_taxpayer_year_record(
     year_record_id: int,
-    request: TaxpayerYearRecordUpdate
+    request: TaxpayerYearRecordUpdate,
+    http_request: Request,
 ):
     try:
+        _require_group(http_request, _year_record_group(year_record_id))
         result = taxpayer_year_records_service.update(
             year_record_id=year_record_id,
             note=request.note,
@@ -1230,8 +1422,9 @@ def update_taxpayer_year_record(
 
 # ลบผู้เสียภาษีออกจากปีภาษีนั้นๆ
 @app.put("/api/taxpayer-year-records/{year_record_id}/remove")
-def remove_taxpayer_from_year(year_record_id: int):
+def remove_taxpayer_from_year(year_record_id: int, request: Request):
     try:
+        _require_group(request, _year_record_group(year_record_id))
         result = taxpayer_year_records_service.remove_from_year(
             year_record_id
         )
@@ -1271,9 +1464,11 @@ class TaxAssessmentCreate(BaseModel):
     created_by: int | None = None
 @app.post("/api/tax-assessments")
 def create_tax_assessment(
-    request: TaxAssessmentCreate
+    request: TaxAssessmentCreate,
+    http_request: Request,
 ):
     try:
+        _require_group(http_request, _year_record_group(request.year_record_id))
         result = tax_assessments_service.create(
             year_record_id=request.year_record_id,
             tax_type=request.tax_type,
@@ -1282,7 +1477,7 @@ def create_tax_assessment(
             change_reason=request.change_reason,
             assessment_date=request.assessment_date,
             annual_due_date=request.annual_due_date,
-            created_by=request.created_by
+            created_by=_actor_id(http_request)
         )
 
         if result["Is Error"]:
@@ -1318,9 +1513,11 @@ class TaxAssessmentUpdate(BaseModel):
 @app.put("/api/tax-assessments/{assessment_id}")
 def update_tax_assessment(
     assessment_id: int,
-    request: TaxAssessmentUpdate
+    request: TaxAssessmentUpdate,
+    http_request: Request,
 ):
     try:
+        _require_group(http_request, _assessment_group(assessment_id))
         result = tax_assessments_service.update(
             assessment_id=assessment_id,
             assessed_amount=request.assessed_amount,
@@ -1328,7 +1525,7 @@ def update_tax_assessment(
             change_reason=request.change_reason,
             assessment_date=request.assessment_date,
             annual_due_date=request.annual_due_date,
-            updated_by=request.updated_by
+            updated_by=_actor_id(http_request)
         )
 
         if result["Is Error"]:
@@ -1356,9 +1553,11 @@ def update_tax_assessment(
 #read one
 @app.get("/api/tax-assessments/{assessment_id}")
 def get_tax_assessment(
-    assessment_id: int
+    assessment_id: int,
+    request: Request,
 ):
     try:
+        _require_group(request, _assessment_group(assessment_id))
         result, tax_assessment = tax_assessments_service.read(
             assessment_id
         )

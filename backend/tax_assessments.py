@@ -57,7 +57,7 @@ class Tax_assessments:
 
     # READ ALL TAX ASSESSMENTS
     # ใช้สำหรับหน้า Figma Annual Taxpayer
-    def dump(self):
+    def dump(self, group_code=None):
 
         data, columns = self.db.fetch(
             """
@@ -131,7 +131,11 @@ class Tax_assessments:
             LEFT JOIN public.tax_assessments ta
                 ON tyr.year_record_id = ta.year_record_id
 
+            JOIN public.taxpayers t
+                ON t.taxpayer_id = tyr.taxpayer_id
+
             WHERE tyr.is_included = TRUE
+              AND (%s::text IS NULL OR t.group_code = %s::text)
 
             GROUP BY
                 tyr.year_record_id,
@@ -142,7 +146,8 @@ class Tax_assessments:
             ORDER BY
                 tyr.tax_year DESC,
                 tyr.taxpayer_id
-            """
+            """,
+            (group_code, group_code)
         )
 
         tax_assessments = []

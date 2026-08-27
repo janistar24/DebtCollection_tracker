@@ -1,6 +1,6 @@
 import type { FollowUp, Taxpayer } from '../types'
 
-// คงชื่อไฟล์เดิมเพื่อไม่ให้ import เดิมพัง แต่ไม่มี mock records แล้ว
+// ฟังก์ชันคำนวณจากข้อมูลจริงที่โหลดจาก API
 export const CURRENT_YEAR = new Date().getFullYear() + 543
 
 export const getTaxpayerName = (tp: Taxpayer) => tp.type === 'company'

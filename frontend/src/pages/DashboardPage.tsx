@@ -11,7 +11,7 @@ import {
   getFollowStatus, getLastFollowUp, formatCurrency, formatDate,
   CURRENT_YEAR, getTaxpayerName, getLandRemaining,
   getSignRemaining, getAssessment
-} from '../data/mockData'
+} from '../data/taxData'
 import type { FollowUp } from '../types'
 import { createFollowUpLog } from '../api/follow_up_logs'
 

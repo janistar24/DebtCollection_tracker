@@ -56,7 +56,7 @@ class Follow_up_logs:
         )
 
     # READ ALL FOLLOW UP LOGS
-    def dump(self):
+    def dump(self, group_code=None):
 
         data, columns = self.db.fetch(
             """
@@ -83,10 +83,16 @@ class Follow_up_logs:
             JOIN public.taxpayer_year_records tyr
                 ON f.year_record_id = tyr.year_record_id
 
+            JOIN public.taxpayers t
+                ON t.taxpayer_id = tyr.taxpayer_id
+
+            WHERE (%s::text IS NULL OR t.group_code = %s::text)
+
             ORDER BY
                 f.contacted_at DESC,
                 f.follow_up_id DESC
-            """
+            """,
+            (group_code, group_code)
         )
 
         follow_up_logs = []

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { CURRENT_YEAR } from '../data/mockData'
+import { CURRENT_YEAR } from '../data/taxData'
 
 interface Props {
   value: number

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useApp } from '../context/AppContext'
 import { createCompletePayment } from '../api/payments'
-import { formatCurrency, getLandRemaining, getSignRemaining, getTaxpayerName } from '../data/mockData'
+import { formatCurrency, getLandRemaining, getSignRemaining, getTaxpayerName } from '../data/taxData'
 import type { Taxpayer } from '../types'
 
 type Scope = 'land' | 'sign' | 'both'

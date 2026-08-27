@@ -15,7 +15,7 @@ import {
   getPaymentStatus,
   getLastFollowUp,
   CURRENT_YEAR
-} from '../data/mockData'
+} from '../data/taxData'
 import type { Taxpayer, Payment } from '../types'
 import PaymentForm from '../components/PaymentForm'
 import { readPaymentSlip } from '../api/slips'

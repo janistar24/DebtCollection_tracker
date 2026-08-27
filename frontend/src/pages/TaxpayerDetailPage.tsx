@@ -7,7 +7,7 @@ import {
   getTaxpayerName, formatCurrency, formatDate, formatDateTime,
   getPaymentStatus, getLandRemaining, getSignRemaining, CURRENT_YEAR,
   getLandPaid, getSignPaid
-} from '../data/mockData'
+} from '../data/taxData'
 import type { FollowUp, Payment, Taxpayer } from '../types'
 import { deleteTaxpayerMaster, updateTaxpayerMaster } from '../api/taxpayers'
 import { generateOwnerCode, isDuplicateCode } from '../utils/ownerCode'

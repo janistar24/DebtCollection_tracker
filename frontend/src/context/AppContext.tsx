@@ -13,7 +13,7 @@ import { getFollowUpLogs } from '../api/follow_up_logs'
 import { getTaxAssessments } from '../api/tax_assessments'
 import { getTaxpayers } from '../api/taxpayers'
 import { getUsers } from '../api/users'
-import { CURRENT_YEAR } from '../data/mockData'
+import { CURRENT_YEAR } from '../data/taxData'
 import type { FollowUp, Payment, TaxAssessment, Taxpayer, User } from '../types'
 
 interface AppState {
@@ -117,14 +117,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [currentUser, refreshData])
 
   const login = async (username: string, password: string): Promise<boolean> => {
-    try {
-      const user = await apiLogin(username, password)
-      setCurrentUser(user)
-      return true
-    } catch (error) {
-      console.error('เข้าสู่ระบบไม่สำเร็จ:', error)
-      return false
-    }
+    const user = await apiLogin(username, password)
+    setCurrentUser(user)
+    return true
   }
 
   const logout = () => {

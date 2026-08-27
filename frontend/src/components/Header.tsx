@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useApp } from '../context/AppContext'
 import YearSelector from './YearSelector'
 import Modal from './Modal'
-import { CURRENT_YEAR } from '../data/mockData'
+import { CURRENT_YEAR } from '../data/taxData'
 
 const ROLE_LABEL: Record<string, string> = {
   officer: 'เจ้าหน้าที่ผู้รับผิดชอบ',

@@ -1,5 +1,3 @@
-import code
-
 from DBHelper import DBHelper
 
 
@@ -62,7 +60,7 @@ class Taxpayers:
         )
 
     # READ ALL USERS
-    def dump(self):
+    def dump(self, group_code=None):
         data, columns = self.db.fetch(
             """
             SELECT
@@ -89,8 +87,10 @@ class Taxpayers:
 
             LEFT JOIN public.users u
             ON ra.user_id = u.user_id
+            WHERE (%s::text IS NULL OR t.group_code = %s::text)
             ORDER BY t.taxpayer_id
-            """
+            """,
+            (group_code, group_code)
         )
 
         taxpayers = []

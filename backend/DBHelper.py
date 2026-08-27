@@ -14,13 +14,14 @@ class DBHelper:
     """PostgreSQL helper ที่นำ connection กลับมาใช้ซ้ำ"""
 
     def __init__(self):
+        self.database_url = os.getenv("DATABASE_URL")
         self.host = os.getenv("POSTGRES_HOST")
         self.port = os.getenv("POSTGRES_PORT", "5432")
         self.user = os.getenv("POSTGRES_USER")
         self.password = os.getenv("POSTGRES_PASSWORD")
         self.db = os.getenv("POSTGRES_DB")
-        self.min_pool_size = max(1, int(os.getenv("DB_POOL_MIN", "1")))
-        self.max_pool_size = max(self.min_pool_size, int(os.getenv("DB_POOL_MAX", "8")))
+        self.min_pool_size = max(0, int(os.getenv("DB_POOL_MIN", "0")))
+        self.max_pool_size = max(1, self.min_pool_size, int(os.getenv("DB_POOL_MAX", "8")))
         self.pool_timeout = float(os.getenv("DB_POOL_TIMEOUT", "15"))
         self.connect_timeout = max(1, int(os.getenv("DB_CONNECT_TIMEOUT", "10")))
         self.statement_timeout_ms = max(1000, int(os.getenv("DB_STATEMENT_TIMEOUT_MS", "30000")))
@@ -33,12 +34,8 @@ class DBHelper:
             self._connection_count += 1
 
     def _new_connection(self) -> psycopg.Connection:
-        return psycopg.connect(
-            host=self.host,
-            port=self.port,
-            user=self.user,
-            password=self.password,
-            dbname=self.db,
+        ssl_required = os.getenv("DATABASE_SSL", "false").lower() in {"1", "true", "yes", "on"}
+        connection_kwargs = dict(
             connect_timeout=self.connect_timeout,
             options=f"-c statement_timeout={self.statement_timeout_ms} -c timezone=UTC",
             application_name="debt_collection_api",
@@ -46,6 +43,18 @@ class DBHelper:
             keepalives_idle=30,
             keepalives_interval=10,
             keepalives_count=3,
+        )
+        if ssl_required:
+            connection_kwargs["sslmode"] = "require"
+        if self.database_url:
+            return psycopg.connect(self.database_url, **connection_kwargs)
+        return psycopg.connect(
+            host=self.host,
+            port=self.port,
+            user=self.user,
+            password=self.password,
+            dbname=self.db,
+            **connection_kwargs,
         )
 
     def _acquire(self) -> psycopg.Connection:

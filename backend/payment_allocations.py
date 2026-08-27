@@ -50,7 +50,7 @@ class Payment_allocations:
         )
 
     # READ ALL PAYMENT ALLOCATIONS
-    def dump(self):
+    def dump(self, group_code=None):
 
         data, columns = self.db.fetch(
             """
@@ -88,10 +88,16 @@ class Payment_allocations:
             JOIN public.taxpayer_year_records tyr
                 ON ta.year_record_id = tyr.year_record_id
 
+            JOIN public.taxpayers t
+                ON t.taxpayer_id = tyr.taxpayer_id
+
+            WHERE (%s::text IS NULL OR t.group_code = %s::text)
+
             ORDER BY
                 pa.matched_at DESC,
                 pa.allocation_id DESC
-            """
+            """,
+            (group_code, group_code)
         )
 
         payment_allocations = []

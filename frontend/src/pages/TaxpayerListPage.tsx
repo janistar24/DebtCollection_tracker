@@ -7,7 +7,7 @@ import EmptyState from '../components/EmptyState'
 import {
   getTaxpayerName, formatCurrency, getAssessment, getPaymentStatus,
   CURRENT_YEAR, getGroupForCode
-} from '../data/mockData'
+} from '../data/taxData'
 import {
   createTaxAssessment,
   updateTaxAssessment

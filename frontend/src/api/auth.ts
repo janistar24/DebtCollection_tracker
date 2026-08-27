@@ -21,19 +21,31 @@ export async function login(
   username: string,
   password: string
 ): Promise<User> {
-
-  const response = await fetch(`${API_URL}/login`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      username,
-      password,
-    }),
-  })
+  let response: Response
+  try {
+    response = await fetch(`${API_URL}/login`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        username,
+        password,
+      }),
+    })
+  } catch {
+    throw new Error('ไม่สามารถเชื่อมต่อระบบเข้าสู่ระบบได้ กรุณาตรวจสอบ Backend และ VITE_API_URL')
+  }
 
   if (!response.ok) {
+    let serverDetail = ''
+    try {
+      const body = await response.json() as { detail?: string }
+      if (typeof body.detail === 'string') serverDetail = body.detail
+    } catch {
+      // ใช้ข้อความมาตรฐานเมื่อ response ไม่ใช่ JSON
+    }
+
     if (response.status === 401) {
       throw new Error('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง')
     }
@@ -42,7 +54,11 @@ export async function login(
       throw new Error('บัญชีผู้ใช้งานถูกปิดใช้งาน')
     }
 
-    throw new Error('ไม่สามารถเข้าสู่ระบบได้')
+    if (response.status === 429) {
+      throw new Error(serverDetail || 'เข้าสู่ระบบไม่สำเร็จหลายครั้ง กรุณารอสักครู่')
+    }
+
+    throw new Error(serverDetail || `ไม่สามารถเข้าสู่ระบบได้ (HTTP ${response.status})`)
   }
 
   const result = (await response.json()) as LoginResponse

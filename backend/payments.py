@@ -53,7 +53,7 @@ class Payments:
         )
 
     # READ ALL PAYMENTS
-    def dump(self):
+    def dump(self, group_code=None):
 
         data, columns = self.db.fetch(
             """
@@ -70,10 +70,21 @@ class Payments:
 
             FROM public.payments
 
+            WHERE %s::text IS NULL OR EXISTS (
+                SELECT 1
+                FROM public.payment_allocations pa
+                JOIN public.tax_assessments ta ON ta.assessment_id=pa.assessment_id
+                JOIN public.taxpayer_year_records tyr ON tyr.year_record_id=ta.year_record_id
+                JOIN public.taxpayers t ON t.taxpayer_id=tyr.taxpayer_id
+                WHERE pa.payment_id=payments.payment_id
+                  AND t.group_code=%s::text
+            )
+
             ORDER BY
                 payment_date DESC,
                 payment_id DESC
-            """
+            """,
+            (group_code, group_code)
         )
 
         payments = []
