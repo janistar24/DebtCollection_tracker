@@ -22,8 +22,8 @@ const FOLLOW_FILTER_LABELS = [
 
 const TASK_SCOPE_LABELS = [
   { key: 'all', label: 'ทั้งหมด' },
-  { key: 'today', label: 'ติดต่อวันนี้' },
-  { key: 'previous', label: 'งานค้างก่อนหน้า' },
+  { key: 'today', label: 'รายการที่ติดต่อวันนี้' },
+  { key: 'previous', label: 'รายการค้างจากวันก่อน' },
 ] as const
 
 const PAYMENT_FILTER_LABELS = [
@@ -137,7 +137,7 @@ function _LegacyCallLogModal({ onClose, onSave }: { onClose: () => void; onSave:
           {step === 1 && (
             <div>
               <div ref={searchRef} style={{ position: 'relative', marginBottom: 16 }}>
-                <input className="input-field" placeholder="🔍 ค้นหาชื่อ / รหัสเจ้าของทรัพย์สิน / เบอร์โทร"
+                <input className="input-field" placeholder="🔍 ค้นหาชื่อ / รหัสเจ้าของทรัพย์สิน / หมายเลขโทรศัพท์"
                   value={query} autoFocus
                   onChange={e => { setQuery(e.target.value); setShowSuggestions(true); setSelected(null) }}
                   onFocus={() => query && setShowSuggestions(true)} />
@@ -160,7 +160,7 @@ function _LegacyCallLogModal({ onClose, onSave }: { onClose: () => void; onSave:
                           <div style={{ fontSize: 11, color: '#a89cc8', display: 'flex', gap: 10, marginTop: 2 }}>
                             <span style={{ fontFamily: 'monospace' }}>{tp.ownerCode}</span>
                             <span>{tp.phone}</span>
-                            {(assess?.landAmount ?? 0) > 0 && <span>ที่ดินฯ {formatCurrency(getLandRemaining(tp, selectedYear))} บาท</span>}
+                            {(assess?.landAmount ?? 0) > 0 && <span>ภาษีที่ดินและสิ่งปลูกสร้าง {formatCurrency(getLandRemaining(tp, selectedYear))} บาท</span>}
                             {(assess?.signAmount ?? 0) > 0 && <span>ป้าย {formatCurrency(getSignRemaining(tp, selectedYear))} บาท</span>}
                           </div>
                         </div>
@@ -170,7 +170,7 @@ function _LegacyCallLogModal({ onClose, onSave }: { onClose: () => void; onSave:
                 )}
               </div>
               {query && suggestions.length === 0 && <div style={{ fontSize: 13, color: '#a89cc8', textAlign: 'center', padding: '12px 0' }}>ไม่พบข้อมูล</div>}
-              <div style={{ fontSize: 12, color: '#c4b5f0', textAlign: 'center', marginTop: 8 }}>พิมพ์ชื่อ รหัสทรัพย์สิน หรือเบอร์โทรเพื่อค้นหา</div>
+              <div style={{ fontSize: 12, color: '#c4b5f0', textAlign: 'center', marginTop: 8 }}>พิมพ์ชื่อ รหัสทรัพย์สิน หรือหมายเลขโทรศัพท์เพื่อค้นหา</div>
             </div>
           )}
 
@@ -183,7 +183,7 @@ function _LegacyCallLogModal({ onClose, onSave }: { onClose: () => void; onSave:
                   <div style={{ fontWeight: 700, fontSize: 14, color: '#2d2545' }}>{getTaxpayerName(selected)}</div>
                   <div style={{ fontSize: 11, color: '#a89cc8', fontFamily: 'monospace' }}>{selected.ownerCode} · {selected.phone}</div>
                   <div style={{ marginTop: 6, display: 'flex', gap: 8 }}>
-                    {(a?.landAmount ?? 0) > 0 && <span style={{ fontSize: 12, color: '#3a5fbf', fontWeight: 600 }}>ที่ดินฯ คงเหลือ {formatCurrency(landRem)} บาท</span>}
+                    {(a?.landAmount ?? 0) > 0 && <span style={{ fontSize: 12, color: '#3a5fbf', fontWeight: 600 }}>ภาษีที่ดินและสิ่งปลูกสร้าง คงเหลือ {formatCurrency(landRem)} บาท</span>}
                     {(a?.signAmount ?? 0) > 0 && <span style={{ fontSize: 12, color: '#7c5cbf', fontWeight: 600 }}>ป้าย คงเหลือ {formatCurrency(signRem)} บาท</span>}
                   </div>
                 </div>
@@ -195,7 +195,7 @@ function _LegacyCallLogModal({ onClose, onSave }: { onClose: () => void; onSave:
                 <div style={{ marginBottom: 14 }}>
                   <div style={{ fontSize: 12, fontWeight: 600, color: '#6b5b95', marginBottom: 6 }}>การติดตามครั้งนี้เกี่ยวกับ</div>
                   <div style={{ display: 'flex', gap: 8 }}>
-                    {[['both', 'ทั้งสองประเภท'], ['land', 'ภาษีที่ดินฯ'], ['sign', 'ภาษีป้าย']].map(([k, l]) => (
+                    {[['both', 'ทั้งสองประเภท'], ['land', 'ภาษีที่ดินและสิ่งปลูกสร้าง'], ['sign', 'ภาษีป้าย']].map(([k, l]) => (
                       <button key={k} onClick={() => setTaxScope(k as typeof taxScope)} style={{
                         padding: '6px 12px', borderRadius: 8, fontSize: 12, cursor: 'pointer',
                         border: taxScope === k ? '1.5px solid #7c5cbf' : '1px solid rgba(180,165,230,0.3)',
@@ -251,7 +251,7 @@ function _LegacyCallLogModal({ onClose, onSave }: { onClose: () => void; onSave:
 
               <div style={{ marginBottom: 12 }}>
                 <div style={{ fontSize: 12, fontWeight: 600, color: '#6b5b95', marginBottom: 6 }}>หมายเหตุ / รายละเอียดการสนทนา</div>
-                <textarea className="input-field" placeholder="บันทึกสิ่งที่คุยกัน..." rows={2}
+                <textarea className="input-field" placeholder="ระบุรายละเอียดการติดต่อ" rows={2}
                   value={fuDetail} onChange={e => setFuDetail(e.target.value)}
                   style={{ resize: 'vertical', minHeight: 60 }} />
               </div>
@@ -385,7 +385,7 @@ function CallLogModal({ onClose, onSave }: { onClose: () => void; onSave: (fu: O
         <div style={{ textAlign: 'center', padding: '52px 0' }}>
           <div style={{ fontSize: 38, marginBottom: 10 }}>✅</div>
           <div style={{ fontSize: 16, fontWeight: 700, color: '#1a8f5a' }}>บันทึกการติดต่อเรียบร้อยแล้ว</div>
-          <div style={{ fontSize: 12, color: '#9487b4', marginTop: 5 }}>Task List วันนี้ได้รับการอัปเดตแล้ว</div>
+          <div style={{ fontSize: 12, color: '#9487b4', marginTop: 5 }}>รายการติดตามประจำวันได้รับการปรับปรุงแล้ว</div>
         </div>
       ) : (
         <>
@@ -411,7 +411,7 @@ function CallLogModal({ onClose, onSave }: { onClose: () => void; onSave: (fu: O
               <div style={{ padding: 12, borderBottom: '1px solid rgba(200,190,240,0.26)' }}>
                 <input
                   className="input-field"
-                  placeholder="ค้นหาชื่อ รหัส หรือเบอร์โทร"
+                  placeholder="ค้นหาชื่อ รหัส หรือหมายเลขโทรศัพท์"
                   value={query}
                   onChange={e => setQuery(e.target.value)}
                   style={{ padding: '9px 11px', fontSize: 12 }}
@@ -510,7 +510,7 @@ function CallLogModal({ onClose, onSave }: { onClose: () => void; onSave: (fu: O
                       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 7 }}>
                         {(selectedAssessment?.landAmount ?? 0) > 0 && (
                           <span style={{ background: '#f0ecfb', color: '#5f4399', borderRadius: 7, padding: '4px 7px', fontSize: 11 }}>
-                            🏠 ภาษีที่ดินฯ ฿{formatCurrency(landRemaining)}
+                            🏠 ภาษีที่ดินและสิ่งปลูกสร้าง ฿{formatCurrency(landRemaining)}
                           </span>
                         )}
                         {(selectedAssessment?.signAmount ?? 0) > 0 && (
@@ -827,7 +827,7 @@ export default function DashboardPage() {
     {
       step: '②',
       icon: '📋',
-      label: 'ดู Task List วันนี้',
+      label: 'ตรวจสอบรายการติดตามประจำวัน',
       sub: `${taskTaxpayers.length} รายการที่ต้องติดตามและดำเนินการต่อ`,
       action: () => document.getElementById('daily-task-list')?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
     },
@@ -841,7 +841,7 @@ export default function DashboardPage() {
     {
       step: '④',
       icon: '📊',
-      label: 'ดูรายงานวันนี้',
+      label: 'ตรวจสอบรายงานประจำวัน',
       sub: 'ตรวจสอบผลการติดตามและยอดรับชำระ',
       action: () => navigate('/reports'),
     },
@@ -985,8 +985,8 @@ export default function DashboardPage() {
           {[
             { label: 'ผู้ใช้งานระบบ', val: 'ใช้งานอยู่ 6 บัญชี', icon: '👤', action: () => navigate('/admin/users') },
             { label: 'ข้อมูลปีภาษีปัจจุบัน', val: `${taxpayers.length} รายการ`, icon: '📋', action: () => navigate('/taxpayers') },
-            { label: 'รายการที่ต้องตรวจสอบ', val: 'Payment ยังไม่ Match 12 รายการ', icon: '⚠️', action: () => navigate('/search-payment') },
-            { label: 'ความสมบูรณ์ของข้อมูล', val: `ไม่มีเบอร์โทร ${taxpayers.filter(tp => !tp.phone).length} ราย`, icon: '📊', action: () => navigate('/taxpayers') },
+            { label: 'รายการที่ต้องตรวจสอบ', val: 'รายการชำระที่ยังไม่ได้จับคู่ 12 รายการ', icon: '⚠️', action: () => navigate('/search-payment') },
+            { label: 'ความสมบูรณ์ของข้อมูล', val: `ไม่มีหมายเลขโทรศัพท์ ${taxpayers.filter(tp => !tp.phone).length} ราย`, icon: '📊', action: () => navigate('/taxpayers') },
           ].map(c => (
             <div key={c.label} className="glass-card" style={{ padding: '14px 16px', cursor: 'pointer' }} onClick={c.action}>
               <div style={{ fontSize: 20, marginBottom: 6 }}>{c.icon}</div>
@@ -1240,7 +1240,7 @@ export default function DashboardPage() {
 
                 <button className="btn-secondary" style={{ fontSize: 12, padding: '7px 12px', width: '100%' }}
                   onClick={() => navigate(`/taxpayers?group=${encodeURIComponent(g.group)}`)}>
-                  ดูรายละเอียดกลุ่ม
+                  ตรวจสอบรายละเอียดกลุ่ม
                 </button>
               </div>
             ))}
@@ -1253,7 +1253,7 @@ export default function DashboardPage() {
         <div style={{ padding: '14px 22px', borderBottom: '1px solid rgba(200,190,240,0.25)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: '#2d2545' }}>Task List ติดตามการชำระ</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#2d2545' }}>รายการติดตามการชำระภาษี</div>
               <div style={{ fontSize: 10, color: '#a89cc8', marginTop: 2 }}>
                 ติดต่อวันนี้ {contactedTodayCount} ราย · งานค้างก่อนหน้า {previousPendingCount} ราย
               </div>
@@ -1414,7 +1414,7 @@ export default function DashboardPage() {
                   const followStat = getFollowStatus(tp, selectedYear)
                   const landRem2 = getLandRemaining(tp, selectedYear)
                   const signRem2 = getSignRemaining(tp, selectedYear)
-                  const remainingTypes = [landRem2 > 0 ? 'ภาษีที่ดินฯ' : null, signRem2 > 0 ? 'ภาษีป้าย' : null].filter(Boolean) as string[]
+                  const remainingTypes = [landRem2 > 0 ? 'ภาษีที่ดินและสิ่งปลูกสร้าง' : null, signRem2 > 0 ? 'ภาษีป้าย' : null].filter(Boolean) as string[]
                   return (
                     <tr key={tp.id} className="table-row-hover" style={{ borderBottom: '1px solid rgba(200,190,240,0.15)' }}>
                       <td style={{ padding: '10px 14px', color: '#a89cc8', fontSize: 12 }}>{i + 1}</td>
@@ -1443,7 +1443,7 @@ export default function DashboardPage() {
                       </td>
                       <td style={{ padding: '10px 14px' }}>
                         <button className="btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }} onClick={() => navigate(`/taxpayers/${tp.id}`)}>
-                          ดูรายละเอียด →
+                          ตรวจสอบรายละเอียด →
                         </button>
                       </td>
                     </tr>

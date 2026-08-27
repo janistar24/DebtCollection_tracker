@@ -59,7 +59,7 @@ export default function AddTaxpayerPage() {
     if (tpType === 'individual' && !lastName) errs.lastName = 'กรุณากรอกนามสกุล'
     if (tpType === 'individual' && !generatedCode) errs.code = 'ไม่สามารถสร้างรหัสได้ กรุณาตรวจสอบชื่อ-นามสกุล'
     if (tpType === 'company' && !companyName) errs.companyName = 'กรุณากรอกชื่อบริษัท'
-    if (!phone) errs.phone = 'กรุณากรอกเบอร์โทร'
+    if (!phone) errs.phone = 'กรุณากรอกหมายเลขโทรศัพท์'
     if (!address) errs.address = 'กรุณากรอกที่อยู่'
     if (!landAmount && !signAmount) errs.tax = 'กรุณากรอกยอดภาษีอย่างน้อยหนึ่งประเภท'
     if (isDuplicate) errs.code = `รหัส ${generatedCode} ซ้ำกับผู้เสียภาษีที่มีอยู่แล้ว กรุณาตรวจสอบ`
@@ -230,7 +230,7 @@ const handleSubmit = async (
             <div>
               <label style={LBL}>ประเภทผู้เสียภาษี *</label>
               <div style={{ display: 'flex', gap: 8 }}>
-                {[['individual', '👤 บุคคลธรรมดา'], ['company', '🏢 นิติบุคคล / บริษัท']].map(([v, l]) => (
+                {[['individual', '👤 บุคคลธรรมดา'], ['company', '🏢 นิติบุคคลหรือบริษัท']].map(([v, l]) => (
                   <button key={v} type="button" onClick={() => { setTpType(v as 'individual' | 'company'); setFirstName(''); setLastName(''); setCompanyName('') }} style={{
                     padding: '10px 18px', borderRadius: 10, cursor: 'pointer', fontFamily: "'Sarabun',sans-serif", fontSize: 13,
                     border: tpType === v ? '1.5px solid #7c5cbf' : '1px solid rgba(180,165,230,0.3)',
@@ -303,7 +303,7 @@ const handleSubmit = async (
             {/* Contact info */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 16 }}>
               <div>
-                <label style={LBL}>เบอร์โทรศัพท์ *</label>
+                <label style={LBL}>หมายเลขโทรศัพท์ศัพท์ *</label>
                 <input className="input-field" placeholder="08x-xxx-xxxx" value={phone}
                   onChange={e => { setPhone(e.target.value); setErrors(prev => ({ ...prev, phone: '' })) }} />
                 {err('phone')}

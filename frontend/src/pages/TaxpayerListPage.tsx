@@ -25,7 +25,7 @@ const GROUPS = ['ก-น', 'บ-ล', 'ส-ศ', 'ว-ฮ และบริษ�
 
 function exportExcel(rows: import('../types').Taxpayer[], year: number, group: string) {
   // Build CSV content (Excel-compatible UTF-8 BOM)
-  const header = ['ที่', 'ชื่อ - ชื่อสกุล', 'รหัสเจ้าของทรัพย์สิน', 'ภาษีที่ดินฯ (บาท)', 'เพิ่ม/ลด ที่ดินฯ', 'ภาษีป้าย (บาท)', 'เพิ่ม/ลด ป้าย', 'หมายเหตุ']
+  const header = ['ที่', 'ชื่อ - ชื่อสกุล', 'รหัสเจ้าของทรัพย์สิน', 'ภาษีที่ดินและสิ่งปลูกสร้าง (บาท)', 'เพิ่ม/ลด ภาษีที่ดินและสิ่งปลูกสร้าง', 'ภาษีป้าย (บาท)', 'เพิ่ม/ลด ป้าย', 'หมายเหตุ']
   const body = rows.map((tp, i) => {
     const a = tp.assessments.find(x => x.year === year)
     const land = a?.landAmount ?? 0
@@ -214,7 +214,7 @@ export default function TaxpayerListPage() {
     if (newVal === origVal) {
       setPendingEdits(prev => { const n = { ...prev }; delete n[key]; return n })
     } else {
-      setReasonModal({ key, label: `${getTaxpayerName(tp)} — ${type === 'land' ? 'ภาษีที่ดินฯ' : 'ภาษีป้าย'}`, oldVal: origVal, newVal })
+      setReasonModal({ key, label: `${getTaxpayerName(tp)} — ${type === 'land' ? 'ภาษีที่ดินและสิ่งปลูกสร้าง' : 'ภาษีป้าย'}`, oldVal: origVal, newVal })
       setReasonInput(pendingEdits[key]?.reason ?? '')
     }
   }
@@ -806,7 +806,7 @@ const handleInlineAdd = async () => {
     <div className="annual-taxpayer-page" style={{ padding: 24, maxWidth: 1400 }}>
       {/* toolbar */}
       <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-        <input className="input-field" style={{ width: 240 }} placeholder="🔍 ค้นหาชื่อ, รหัส, เบอร์โทร"
+        <input className="input-field" style={{ width: 240 }} placeholder="🔍 ค้นหาชื่อ, รหัส, หมายเลขโทรศัพท์"
           value={search} onChange={e => setSearch(e.target.value)} />
 
         {isDirector && (
@@ -826,7 +826,7 @@ const handleInlineAdd = async () => {
         <select className="input-field" style={{ width: 160 }} value={personTypeFilter} onChange={e => setPersonTypeFilter(e.target.value)}>
           <option value="all">ทุกประเภทบุคคล</option>
           <option value="individual">บุคคลธรรมดา</option>
-          <option value="company">นิติบุคคล / บริษัท</option>
+          <option value="company">นิติบุคคลหรือบริษัท</option>
         </select>
 
         <span style={{ fontSize: 13, color: '#a89cc8' }}>{filtered.length} รายการ</span>
@@ -834,7 +834,7 @@ const handleInlineAdd = async () => {
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
           {!editMode && <>
             <button className="btn-secondary no-print" onClick={() => window.print()} style={{ fontSize: 12 }}>🖨 พิมพ์</button>
-            <button className="btn-secondary no-print" onClick={() => exportExcel(filtered, selectedYear, groupFilter)} style={{ fontSize: 12 }}>📥 Export Excel</button>
+            <button className="btn-secondary no-print" onClick={() => exportExcel(filtered, selectedYear, groupFilter)} style={{ fontSize: 12 }}>📥 ส่งออกข้อมูล Excel</button>
           </>}
 
           {!isDirector && isCurrentYear && !editMode && (
@@ -866,7 +866,7 @@ const handleInlineAdd = async () => {
 
       {selectedYear < CURRENT_YEAR && (
         <div className="no-print" style={{ marginBottom: 16, padding: '10px 16px', background: '#fff8e6', border: '1px solid rgba(230,160,0,0.25)', borderRadius: 12, fontSize: 13, color: '#8a5a00' }}>
-          📁 ปี {selectedYear} เป็นข้อมูลในอดีต — <strong>ดูได้อย่างเดียว</strong>
+          📁 ปี {selectedYear} เป็นข้อมูลในอดีต — <strong>สำหรับตรวจสอบเท่านั้น</strong>
         </div>
       )}
 

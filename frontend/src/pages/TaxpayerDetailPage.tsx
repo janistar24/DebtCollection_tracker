@@ -211,7 +211,7 @@ export default function TaxpayerDetailPage() {
 
   // Build timeline
   const timeline: { date: string; icon: string; title: string; detail?: string; amount?: number }[] = [
-    ...(assess ? [{ date: `2569-01-15`, icon: '📋', title: `ประเมินภาษีปี ${CURRENT_YEAR}`, detail: `ที่ดินฯ ฿${formatCurrency(assess.landAmount)} · ป้าย ฿${formatCurrency(assess.signAmount)}` }] : []),
+    ...(assess ? [{ date: `2569-01-15`, icon: '📋', title: `ประเมินภาษีปี ${CURRENT_YEAR}`, detail: `ภาษีที่ดินและสิ่งปลูกสร้าง ฿${formatCurrency(assess.landAmount)} · ป้าย ฿${formatCurrency(assess.signAmount)}` }] : []),
     ...tp.followUps.map(fu => ({
       date: fu.date, icon: CONTACT_ICONS[fu.type] ?? '📝',
       title: fu.type === 'phone' ? `โทรศัพท์ — ${CALL_RESULT_LABELS[fu.result ?? ''] ?? ''}` : fu.type === 'line' ? 'แจ้งผ่าน LINE' : 'ติดต่อ',
@@ -400,7 +400,7 @@ export default function TaxpayerDetailPage() {
               <div style={{ display: 'flex', gap: 8 }}><button className="btn-secondary" onClick={() => setEditing({ ...tp })}>✏️ แก้ไขข้อมูล</button><button className="btn-ghost" style={{ color: '#c0392b' }} onClick={() => handleDeleteMaster(tp)}>🗑 ลบข้อมูลผู้เสียภาษี</button><StatusBadge status={payStat} /></div>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, fontSize: 13 }}>
-              <div><div style={{ fontSize: 11, color: '#a89cc8', marginBottom: 2 }}>เบอร์โทร</div><div style={{ fontWeight: 500 }}>{tp.phone}</div></div>
+              <div><div style={{ fontSize: 11, color: '#a89cc8', marginBottom: 2 }}>หมายเลขโทรศัพท์</div><div style={{ fontWeight: 500 }}>{tp.phone}</div></div>
               <div><div style={{ fontSize: 11, color: '#a89cc8', marginBottom: 2 }}>กลุ่มผู้รับผิดชอบ</div><div style={{ fontWeight: 500 }}>กลุ่ม {tp.group}</div></div>
               <div><div style={{ fontSize: 11, color: '#a89cc8', marginBottom: 2 }}>พนักงานผู้รับผิดชอบ</div><div style={{ fontWeight: 500 }}>{officer?.name ?? '-'}</div></div>
               <div style={{ gridColumn: '1/-1' }}><div style={{ fontSize: 11, color: '#a89cc8', marginBottom: 2 }}>ที่อยู่</div><div>{tp.address}</div></div>
@@ -498,10 +498,10 @@ export default function TaxpayerDetailPage() {
         </div>
         <form onSubmit={e => { e.preventDefault(); void saveMaster() }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-            <div><label style={LBL}>ประเภทผู้เสียภาษี</label><input className="input-field" value={editing.type === 'company' ? 'นิติบุคคล / บริษัท' : 'บุคคลธรรมดา'} disabled /></div>
+            <div><label style={LBL}>ประเภทผู้เสียภาษี</label><input className="input-field" value={editing.type === 'company' ? 'นิติบุคคลหรือบริษัท' : 'บุคคลธรรมดา'} disabled /></div>
             {editing.type === 'individual' && <div><label style={LBL}>รหัสเจ้าของทรัพย์สิน (สร้างอัตโนมัติ)</label><input className="input-field" value={editing.ownerCode} readOnly style={{ background: 'rgba(240,236,251,.55)', color: '#7055ae', fontWeight: 600 }} /><div style={{ fontSize: 10, color: '#a89cc8', marginTop: 4 }}>รหัสจะเปลี่ยนอัตโนมัติเมื่อแก้ชื่อหรือนามสกุล</div></div>}
             {editing.type === 'individual' ? <><div><label style={LBL}>ชื่อ *</label><input className="input-field" value={editing.firstName} required onChange={e => updateEditingName('firstName', e.target.value)}/></div><div><label style={LBL}>นามสกุล *</label><input className="input-field" value={editing.lastName} required onChange={e => updateEditingName('lastName', e.target.value)}/></div></> : <div style={{gridColumn:'1/-1'}}><label style={LBL}>ชื่อบริษัท / นิติบุคคล *</label><input className="input-field" value={editing.companyName ?? ''} required onChange={e => setEditing({...editing, companyName:e.target.value})}/></div>}
-            <div><label style={LBL}>เบอร์โทรศัพท์ *</label><input className="input-field" value={editing.phone} required onChange={e => setEditing({...editing, phone:e.target.value})}/></div>
+            <div><label style={LBL}>หมายเลขโทรศัพท์ศัพท์ *</label><input className="input-field" value={editing.phone} required onChange={e => setEditing({...editing, phone:e.target.value})}/></div>
             <div><label style={LBL}>กลุ่มผู้รับผิดชอบ *</label><select className="input-field" value={editing.group} onChange={e => setEditing({...editing, group:e.target.value as Taxpayer['group']})}><option>ก-น</option><option>บ-ล</option><option>ส-ศ</option><option>ว-ฮ และบริษัท</option></select></div>
             <div style={{gridColumn:'1/-1'}}><label style={LBL}>ที่อยู่ *</label><textarea className="input-field" rows={3} value={editing.address} required onChange={e => setEditing({...editing, address:e.target.value})}/></div>
           </div>
@@ -602,14 +602,14 @@ export default function TaxpayerDetailPage() {
                 <label style={LBL}>เลือกประเภทภาษีที่ต้องการตัดยอด *</label>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   {[
-                    ['land', `🏠 ภาษีที่ดินฯ · ค้าง ฿${formatCurrency(landRem)}`],
+                    ['land', `🏠 ภาษีที่ดินและสิ่งปลูกสร้าง · ค้าง ฿${formatCurrency(landRem)}`],
                     ['sign', `🪧 ภาษีป้าย · ค้าง ฿${formatCurrency(signRem)}`],
                     ['both', '🏠 + 🪧 ชำระทั้งสองประเภท']
                   ].map(([value, label]) => <button key={value} type="button" onClick={() => selectPayScope(value as 'land' | 'sign' | 'both')} style={{ padding: '8px 12px', borderRadius: 18, cursor: 'pointer', fontFamily: "'Sarabun',sans-serif", fontSize: 12, border: payTaxScope === value ? '1.5px solid #7c5cbf' : '1px solid rgba(180,165,230,.35)', background: payTaxScope === value ? 'rgba(124,92,191,.12)' : '#fff', color: payTaxScope === value ? '#6745ae' : '#6b5b95', fontWeight: payTaxScope === value ? 700 : 500 }}>{label}</button>)}
                 </div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: payTaxScope === 'both' ? '1fr 1fr' : '1fr', gap: 12, marginBottom: 16, padding: 14, background: 'rgba(240,236,251,.45)', borderRadius: 12 }}>
-                {payTaxScope !== 'sign' && <div><label style={LBL}>ยอดตัดภาษีที่ดินฯ (บาท) *</label><input className="input-field" type="number" step="0.01" value={payLandAlloc} onChange={e => setPayLandAlloc(e.target.value)} /></div>}
+                {payTaxScope !== 'sign' && <div><label style={LBL}>ยอดตัดภาษีที่ดินและสิ่งปลูกสร้าง (บาท) *</label><input className="input-field" type="number" step="0.01" value={payLandAlloc} onChange={e => setPayLandAlloc(e.target.value)} /></div>}
                 {payTaxScope !== 'land' && <div><label style={LBL}>ยอดตัดภาษีป้าย (บาท) *</label><input className="input-field" type="number" step="0.01" value={paySignAlloc} onChange={e => setPaySignAlloc(e.target.value)} /></div>}
                 <div style={{ gridColumn: '1/-1', display: 'flex', justifyContent: 'space-between', fontSize: 12, color: Math.abs(allocatedTotal - payAmt_num) < .009 ? '#1a8f5a' : '#c0392b' }}><span>รวมยอดจัดสรร</span><strong>฿{formatCurrency(allocatedTotal)} / ฿{formatCurrency(payAmt_num)}</strong></div>
               </div>
@@ -642,7 +642,7 @@ export default function TaxpayerDetailPage() {
                   {[
                     ['ยอดคงเหลือ', `฿${formatCurrency(totalRemaining)}`, '#2d2545'],
                     ['รับเงินจริง', `฿${formatCurrency(payAmt_num)}`, '#7c5cbf'],
-                    ['ตัดภาษีที่ดินฯ', `฿${formatCurrency(parseFloat(payLandAlloc) || 0)}`, '#3a5fbf'],
+                    ['ตัดภาษีที่ดินและสิ่งปลูกสร้าง', `฿${formatCurrency(parseFloat(payLandAlloc) || 0)}`, '#3a5fbf'],
                     ['ตัดภาษีป้าย', `฿${formatCurrency(parseFloat(paySignAlloc) || 0)}`, '#7c5cbf'],
                   ].map(([l, v, c]) => (
                     <div key={String(l)}>

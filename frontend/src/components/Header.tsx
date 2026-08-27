@@ -15,7 +15,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/taxpayers/new': 'เพิ่มผู้เสียภาษีรายใหม่',
   '/taxpayers/manage': 'จัดการผู้เสียภาษีทั้งหมด',
   '/payment-matching': 'ตรวจสอบการชำระ',
-  '/search-payment': 'ตรวจสอบและบันทึกการชำระ',
+  '/search-payment': 'ตรวจสอบยอดรับและบันทึกการชำระภาษี',
   '/reports': 'รายงาน',
   '/admin/users': 'จัดการผู้ใช้งาน',
 }

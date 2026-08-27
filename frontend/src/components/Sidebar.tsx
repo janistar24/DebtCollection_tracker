@@ -4,32 +4,32 @@ import takhliLogo from '../takhli_logo.jpeg'
 
 const ROLE_MENUS: Record<string, { path: string; icon: string; label: string }[]> = {
   officer: [
-    { path: '/dashboard', icon: '🏠', label: 'หน้าหลัก / งานวันนี้' },
-    { path: '/taxpayers', icon: '📋', label: 'ข้อมูลผู้เสียภาษีประจำปี' },
-    { path: '/taxpayers/manage', icon: '👥', label: 'จัดการผู้เสียภาษีทั้งหมด' },
-    { path: '/taxpayers/new', icon: '➕', label: 'เพิ่มผู้เสียภาษี' },
-    { path: '/search-payment', icon: '💳', label: 'ตรวจสอบและบันทึกการชำระ' },
-    { path: '/reports', icon: '📊', label: 'รายงาน' },
+    { path: '/dashboard', icon: '🏠', label: 'หน้าหลักและงานติดตามประจำวัน' },
+    { path: '/taxpayers', icon: '📋', label: 'รายละเอียดผู้ชำระภาษี (กค.)' },
+    { path: '/taxpayers/manage', icon: '👥', label: 'ทะเบียนผู้เสียภาษี' },
+    { path: '/taxpayers/new', icon: '➕', label: 'ลงทะเบียนผู้เสียภาษีรายใหม่' },
+    { path: '/search-payment', icon: '💳', label: 'ตรวจสอบยอดรับและบันทึกการชำระ' },
+    { path: '/reports', icon: '📊', label: 'รายงานผลการจัดเก็บภาษี' },
   ],
   director: [
-    { path: '/dashboard', icon: '🏠', label: 'ภาพรวมระบบ' },
-    { path: '/taxpayers', icon: '📋', label: 'ข้อมูลผู้เสียภาษี' },
-    { path: '/taxpayers/manage', icon: '👥', label: 'จัดการผู้เสียภาษีทั้งหมด' },
-    { path: '/search-payment', icon: '💳', label: 'ตรวจสอบและบันทึกการชำระ' },
-    { path: '/reports', icon: '📊', label: 'รายงาน' },
+    { path: '/dashboard', icon: '🏠', label: 'หน้าหลักและภาพรวมการดำเนินงาน' },
+    { path: '/taxpayers', icon: '📋', label: 'รายละเอียดผู้ชำระภาษี (กค.)' },
+    { path: '/taxpayers/manage', icon: '👥', label: 'ทะเบียนผู้เสียภาษี' },
+    { path: '/search-payment', icon: '💳', label: 'ตรวจสอบยอดรับและบันทึกการชำระ' },
+    { path: '/reports', icon: '📊', label: 'รายงานผลการจัดเก็บภาษี' },
   ],
   admin: [
-    { path: '/dashboard', icon: '🏠', label: 'หน้าหลัก' },
-    { path: '/taxpayers', icon: '📋', label: 'ข้อมูลผู้เสียภาษี' },
-    { path: '/taxpayers/manage', icon: '👥', label: 'จัดการผู้เสียภาษีทั้งหมด' },
-    { path: '/search-payment', icon: '💳', label: 'ตรวจสอบและบันทึกการชำระ' },
-    { path: '/reports', icon: '📊', label: 'รายงาน' },
-    { path: '/admin/users', icon: '👥', label: 'จัดการผู้ใช้งาน' },
+    { path: '/dashboard', icon: '🏠', label: 'หน้าหลักและภาพรวมการดำเนินงาน' },
+    { path: '/taxpayers', icon: '📋', label: 'รายละเอียดผู้ชำระภาษี (กค.)' },
+    { path: '/taxpayers/manage', icon: '👥', label: 'ทะเบียนผู้เสียภาษี' },
+    { path: '/search-payment', icon: '💳', label: 'ตรวจสอบยอดรับและบันทึกการชำระ' },
+    { path: '/reports', icon: '📊', label: 'รายงานผลการจัดเก็บภาษี' },
+    { path: '/admin/users', icon: '👥', label: 'บริหารบัญชีผู้ใช้งาน' },
   ],
 }
 
 const ROLE_LABEL: Record<string, string> = {
-  officer: 'พนักงาน', director: 'ผู้บริหาร', admin: 'แอดมิน'
+  officer: 'เจ้าหน้าที่ผู้รับผิดชอบ', director: 'ผู้บริหาร', admin: 'ผู้ดูแลระบบ'
 }
 
 interface Props { collapsed: boolean; onToggle: () => void }

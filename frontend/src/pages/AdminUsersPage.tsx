@@ -73,10 +73,10 @@ export default function AdminUsersPage() {
     <div style={{ padding: 24, maxWidth: 900 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
         <div>
-          <h2 style={{ margin: '0 0 4px', fontSize: 18, fontWeight: 700, color: '#2d2545' }}>จัดการผู้ใช้งาน</h2>
+          <h2 style={{ margin: '0 0 4px', fontSize: 18, fontWeight: 700, color: '#2d2545' }}>บริหารบัญชีผู้ใช้งาน</h2>
           <p style={{ margin: 0, fontSize: 13, color: '#a89cc8' }}>กำหนดสิทธิ์และกลุ่มรับผิดชอบของพนักงาน</p>
         </div>
-        <button className="btn-primary" onClick={openAdd}>➕ เพิ่มผู้ใช้งาน</button>
+        <button className="btn-primary" onClick={openAdd}>➕ เพิ่มบัญชีผู้ใช้งาน</button>
       </div>
 
       <div className="glass-card" style={{ padding: 0, overflow: 'hidden' }}>
@@ -134,7 +134,7 @@ export default function AdminUsersPage() {
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                   <div>
-                    <label style={LBL}>Username *</label>
+                    <label style={LBL}>ชื่อผู้ใช้งาน *</label>
                     <input className="input-field" placeholder="username" value={form.username}
                       onChange={e => setForm(f => ({ ...f, username: e.target.value }))} />
                   </div>
@@ -146,7 +146,7 @@ export default function AdminUsersPage() {
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                   <div>
-                    <label style={LBL}>สิทธิ์ (Role)</label>
+                    <label style={LBL}>ระดับสิทธิ์การใช้งาน</label>
                     <select className="input-field" value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}>
                       <option value="officer">เจ้าหน้าที่ผู้รับผิดชอบ</option>
                       <option value="director">ผู้บริหาร</option>

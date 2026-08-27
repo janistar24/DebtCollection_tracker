@@ -141,17 +141,17 @@ export default function PaymentForm({ taxpayer, year, initialAmount, initialMeth
     <div style={{ padding: '12px 14px', borderRadius: 12, background: 'rgba(240,236,251,.55)', marginBottom: 16 }}>
       <div style={{ fontWeight: 700, color: '#2d2545' }}>{getTaxpayerName(taxpayer)}</div>
       <div style={{ fontSize: 11, color: '#a89cc8' }}>{taxpayer.ownerCode || 'นิติบุคคล'} · ปีภาษี {year}</div>
-      <div style={{ display: 'flex', gap: 18, marginTop: 8, fontSize: 12 }}><span>ที่ดินฯ ค้าง <b>฿{formatCurrency(landRemaining)}</b></span><span>ป้ายค้าง <b>฿{formatCurrency(signRemaining)}</b></span></div>
+      <div style={{ display: 'flex', gap: 18, marginTop: 8, fontSize: 12 }}><span>ภาษีที่ดินและสิ่งปลูกสร้าง ค้าง <b>฿{formatCurrency(landRemaining)}</b></span><span>ป้ายค้าง <b>฿{formatCurrency(signRemaining)}</b></span></div>
     </div>
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
       <div><label style={LBL}>ยอดเงินที่ได้รับ (บาท) *</label><input className="input-field" type="number" min="0" step="0.01" value={amount} onChange={e => changeAmount(e.target.value)} /></div>
       <div><label style={LBL}>วันที่และเวลาที่ชำระ *</label><input className="input-field" type="datetime-local" value={dateTime} onChange={e => setDateTime(e.target.value)} /></div>
     </div>
     <div style={{ marginBottom: 14 }}><label style={LBL}>ประเภทภาษีที่ต้องการตัดยอด *</label><div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
-      {([['land','🏠 ภาษีที่ดินฯ'],['sign','🪧 ภาษีป้าย'],['both','🏠 + 🪧 ทั้งสองประเภท']] as [Scope,string][]).map(([value,label]) => <button key={value} type="button" disabled={(value === 'land' && landRemaining <= 0) || (value === 'sign' && signRemaining <= 0) || (value === 'both' && (landRemaining <= 0 || signRemaining <= 0))} onClick={() => changeScope(value)} style={choiceStyle(scope === value)}>{label}</button>)}
+      {([['land','🏠 ภาษีที่ดินและสิ่งปลูกสร้าง'],['sign','🪧 ภาษีป้าย'],['both','🏠 + 🪧 ทั้งสองประเภท']] as [Scope,string][]).map(([value,label]) => <button key={value} type="button" disabled={(value === 'land' && landRemaining <= 0) || (value === 'sign' && signRemaining <= 0) || (value === 'both' && (landRemaining <= 0 || signRemaining <= 0))} onClick={() => changeScope(value)} style={choiceStyle(scope === value)}>{label}</button>)}
     </div></div>
     <div style={{ display: 'grid', gridTemplateColumns: scope === 'both' ? '1fr 1fr' : '1fr', gap: 12, padding: 13, borderRadius: 12, background: 'rgba(240,236,251,.45)', marginBottom: 14 }}>
-      {scope !== 'sign' && <div><label style={LBL}>ตัดยอดภาษีที่ดินฯ *</label><input className="input-field" type="number" min="0" max={Math.min(landRemaining, paymentAmount)} step="0.01" value={landAllocation} onChange={e => changeLandAllocation(e.target.value)} /></div>}
+      {scope !== 'sign' && <div><label style={LBL}>ตัดยอดภาษีที่ดินและสิ่งปลูกสร้าง *</label><input className="input-field" type="number" min="0" max={Math.min(landRemaining, paymentAmount)} step="0.01" value={landAllocation} onChange={e => changeLandAllocation(e.target.value)} /></div>}
       {scope !== 'land' && <div><label style={LBL}>ตัดยอดภาษีป้าย *</label><input className="input-field" type="number" min="0" max={Math.min(signRemaining, paymentAmount)} step="0.01" value={signAllocation} onChange={e => changeSignAllocation(e.target.value)} /></div>}
       <div style={{ gridColumn: '1/-1', display: 'flex', justifyContent: 'space-between', fontSize: 12, color: Math.abs(allocatedTotal-paymentAmount)<.009 ? '#1a8f5a' : '#c0392b' }}><span>รวมยอดตัดภาษี</span><b>฿{formatCurrency(allocatedTotal)} / ฿{formatCurrency(paymentAmount)}</b></div>
     </div>

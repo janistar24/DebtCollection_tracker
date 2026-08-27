@@ -43,9 +43,9 @@ interface Candidate {
 type TaskSearchScope = 'all' | 'today' | 'previous'
 
 const TASK_SEARCH_OPTIONS: { value: TaskSearchScope; label: string }[] = [
-  { value: 'all', label: 'Task List ทั้งหมด' },
-  { value: 'today', label: 'ติดต่อวันนี้' },
-  { value: 'previous', label: 'งานค้างก่อนหน้า' },
+  { value: 'all', label: 'รายการติดตามทั้งหมด' },
+  { value: 'today', label: 'รายการที่ติดต่อวันนี้' },
+  { value: 'previous', label: 'รายการค้างจากวันก่อน' },
 ]
 
 const getLocalDateKey = (value: string | Date) => {
@@ -434,15 +434,15 @@ export default function SearchPaymentPage() {
 
       {/* Header */}
       <div style={{ marginBottom: 20 }}>
-        <h2 style={{ margin: '0 0 4px', fontSize: 20, fontWeight: 700, color: '#2d2545' }}>ตรวจสอบและบันทึกการชำระ</h2>
-        <p style={{ margin: 0, fontSize: 13, color: '#a89cc8' }}>ค้นหาจากยอดเงินที่รับมา หรือบันทึกการชำระเมื่อรู้จากชื่อผู้เสียภาษีแล้ว</p>
+        <h2 style={{ margin: '0 0 4px', fontSize: 20, fontWeight: 700, color: '#2d2545' }}>ตรวจสอบยอดรับและบันทึกการชำระภาษี</h2>
+        <p style={{ margin: 0, fontSize: 13, color: '#a89cc8' }}>ตรวจสอบยอดเงินที่ได้รับ หรือบันทึกการชำระเมื่อทราบผู้ชำระเงิน</p>
       </div>
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: 4, marginBottom: 20, background: 'rgba(240,236,251,0.4)', borderRadius: 14, padding: 4, width: 'fit-content' }}>
         {[
-          { key: 'search', label: 'ค้นหาจากยอดเงิน', icon: '🔍', sub: 'ไม่รู้ว่าใครโอนมา' },
-          { key: 'direct', label: 'บันทึกการชำระ', icon: '✅', sub: 'รู้แล้วว่าใครชำระ' },
+          { key: 'search', label: 'ตรวจสอบจากยอดรับ', icon: '🔍', sub: 'ไม่ทราบผู้ชำระเงิน' },
+          { key: 'direct', label: 'บันทึกการชำระ', icon: '✅', sub: 'ทราบผู้ชำระเงิน' },
         ].map(t => (
           <button key={t.key} onClick={() => setActiveTab(t.key as typeof activeTab)} style={{
             padding: '10px 20px', borderRadius: 10, cursor: 'pointer',
@@ -478,14 +478,14 @@ export default function SearchPaymentPage() {
           </div>
           <button className="btn-primary" onClick={runSearch}
             style={{ alignSelf: 'flex-end', padding: '11px 28px', fontSize: 15 }}>
-            🔍 ค้นหายอด
+            🔍 ตรวจสอบยอดรับชำระ
           </button>
         </div>
 
         <div
           role="button"
           tabIndex={0}
-          aria-label="แนบสลิปเพื่ออ่านยอดเงิน"
+          aria-label="แนบหลักฐานการโอนเงินเพื่อตรวจสอบยอด"
           onClick={() => !slipReading && slipInputRef.current?.click()}
           onKeyDown={e => {
             if ((e.key === 'Enter' || e.key === ' ') && !slipReading) {
@@ -521,13 +521,13 @@ export default function SearchPaymentPage() {
             <div style={{ width: 38, height: 38, borderRadius: 10, background: 'rgba(124,92,191,.12)', display: 'grid', placeItems: 'center', fontSize: 19 }}>📎</div>
             <div>
               <div style={{ fontSize: 13, fontWeight: 600, color: '#5f4794' }}>
-                {slipReading ? 'กำลังอ่านข้อมูลจากสลิป...' : slipDragging ? 'วางไฟล์ตรงนี้' : 'วางสลิปหรือคลิกเพื่อเลือกรูป'}
+                {slipReading ? 'กำลังตรวจสอบข้อมูลจากหลักฐานการโอนเงิน...' : slipDragging ? 'วางไฟล์ตรงนี้' : 'วางหลักฐานการโอนเงินหรือเลือกไฟล์ภาพ'}
               </div>
               <div style={{ marginTop: 3, fontSize: 11, color: '#a89cc8' }}>PNG, JPG, JPEG, WEBP · ไม่เกิน 10 MB · ไม่เก็บไฟล์ในระบบ</div>
             </div>
           </div>
           <button type="button" className="btn-secondary" disabled={slipReading} onClick={e => { e.stopPropagation(); slipInputRef.current?.click() }}>
-            {slipReading ? 'รอสักครู่' : 'เลือกไฟล์'}
+            {slipReading ? 'กรุณารอสักครู่' : 'เลือกไฟล์'}
           </button>
           <input ref={slipInputRef} type="file" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp" hidden disabled={slipReading} onChange={e => { void handleSlipFile(e.target.files?.[0]); e.currentTarget.value = '' }} />
         </div>
@@ -584,7 +584,7 @@ export default function SearchPaymentPage() {
         {!isDirector && (
           <div style={{ marginTop: 10, fontSize: 12, color: '#a89cc8' }}>
             🔒 ค้นหาภายในกลุ่ม <strong style={{ color: '#7c5cbf' }}>{currentUser?.group}</strong> ของคุณ
-            · Director สามารถค้นหาทุกกลุ่มได้
+            · ผู้บริหารสามารถค้นหาได้ทุกกลุ่มรับผิดชอบ
           </div>
         )}
       </div>
@@ -639,7 +639,7 @@ export default function SearchPaymentPage() {
                           const assessed = getTotalAssessed(tp, selectedYear)
                           const remaining = getTotalRemaining(tp, selectedYear)
                           const paid = assessed - remaining
-                          const taxType = [assess?.landAmount ? 'ที่ดินฯ' : null, assess?.signAmount ? 'ป้าย' : null].filter(Boolean).join('+')
+                          const taxType = [assess?.landAmount ? 'ภาษีที่ดินและสิ่งปลูกสร้าง' : null, assess?.signAmount ? 'ป้าย' : null].filter(Boolean).join('+')
                           const isSelected = drawerTp?.id === tp.id
                           const diffSign = c.diff >= 0 ? '+' : ''
 
@@ -872,7 +872,7 @@ export default function SearchPaymentPage() {
           ) : (
             <>
               <div style={{ marginBottom: 14 }}>
-                <label style={LBL}>ค้นหาผู้เสียภาษี (ชื่อ หรือ Owner Code)</label>
+                <label style={LBL}>ค้นหาผู้เสียภาษี (ชื่อหรือรหัสเจ้าของทรัพย์สิน)</label>
                 <input className="input-field" placeholder="พิมพ์ชื่อหรือรหัส..." value={cashSearch}
                   onChange={e => { setCashSearch(e.target.value); setCashTp(null) }} autoFocus />
                 {cashPool.length > 0 && !cashTp && (
@@ -1050,7 +1050,7 @@ function DirectPaymentTab() {
 
         {/* Step 1: Search taxpayer */}
         <div style={{ marginBottom: 20 }} ref={dropRef}>
-          <label style={LBL}>ค้นหาผู้เสียภาษี (ชื่อ / รหัสทรัพย์สิน / เบอร์โทร) *</label>
+          <label style={LBL}>ค้นหาผู้เสียภาษี (ชื่อ / รหัสทรัพย์สิน / หมายเลขโทรศัพท์) *</label>
           <input className="input-field" placeholder="พิมพ์เพื่อค้นหา..." value={search}
             onChange={e => { setSearch(e.target.value); setSelectedTp(null); setShowSuggestions(true) }}
             onFocus={() => search && setShowSuggestions(true)} autoFocus />
@@ -1095,7 +1095,7 @@ function DirectPaymentTab() {
                 <div style={{ marginBottom: 16 }}>
                   <label style={LBL}>ประเภทภาษีที่ชำระ</label>
                   <div style={{ display: 'flex', gap: 8 }}>
-                    {[['both', 'ทั้งสองประเภท'], ['land', 'ภาษีที่ดินฯ'], ['sign', 'ภาษีป้าย']].map(([k, l]) => (
+                    {[['both', 'ทั้งสองประเภท'], ['land', 'ภาษีที่ดินและสิ่งปลูกสร้าง'], ['sign', 'ภาษีป้าย']].map(([k, l]) => (
                       <button key={k} onClick={() => setTaxType(k as typeof taxType)} style={{
                         padding: '6px 14px', borderRadius: 8, fontSize: 12, cursor: 'pointer',
                         border: taxType === k ? '1.5px solid #7c5cbf' : '1px solid rgba(180,165,230,0.3)',

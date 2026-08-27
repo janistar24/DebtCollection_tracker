@@ -140,7 +140,7 @@ export default function LoginPage() {
                   color: '#6b5b95',
                 }}
               >
-                Username
+                ชื่อผู้ใช้งาน
               </label>
 
               <input
@@ -171,7 +171,7 @@ export default function LoginPage() {
                   color: '#6b5b95',
                 }}
               >
-                Password
+                รหัสผ่าน
               </label>
 
               <input
