@@ -347,6 +347,8 @@ select.input-field {
 
   .annual-print-table tbody tr {
     height: 7.2mm;
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
   }
 
   .annual-print-table .number-cell {
@@ -358,10 +360,11 @@ select.input-field {
   .annual-print-page-number {
     position: absolute;
     right: 0;
-    bottom: 0;
-    left: 0;
-    text-align: center;
+    top: 0;
+    left: auto;
+    text-align: right;
     font-size: 7pt;
+    font-weight: 600;
   }
 
   /* Report layout A: monthly chart gets the full row; summaries stay below. */
@@ -374,6 +377,33 @@ select.input-field {
   .report-visualizations {
     display: grid !important;
     grid-template-columns: 1fr !important;
+  }
+
+  .report-kpis {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    gap: 7px !important;
+  }
+
+  .report-kpi-card {
+    min-width: 0 !important;
+    padding: 9px 10px !important;
+    border-radius: 10px !important;
+  }
+
+  .report-kpi-label {
+    min-height: 0 !important;
+    margin-bottom: 3px !important;
+    font-size: 8pt !important;
+    white-space: nowrap !important;
+  }
+
+  .report-kpi-value {
+    font-size: 13pt !important;
+    line-height: 1.2 !important;
+  }
+
+  .report-monthly-canvas {
+    height: 220px !important;
   }
 
   .report-bottom-grid {

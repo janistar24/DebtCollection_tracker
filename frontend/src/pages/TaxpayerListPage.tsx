@@ -22,7 +22,9 @@ import { bulkSaveTaxpayerYearRecords } from '../api/taxpayer_year_records'
 import type { Taxpayer } from '../types'
 
 const GROUPS = ['ก-น', 'บ-ล', 'ส-ศ', 'ว-ฮ และบริษัท']
-const PRINT_ROWS_PER_PAGE = 28
+// Safari needs extra room for Thai text and notes that may wrap to a second line.
+// Keeping 22 records per A4 page prevents the final row from being clipped.
+const PRINT_ROWS_PER_PAGE = 22
 
 function exportExcel(rows: import('../types').Taxpayer[], year: number, group: string) {
   // Build CSV content (Excel-compatible UTF-8 BOM)
@@ -881,6 +883,7 @@ const handleInlineAdd = async () => {
       <div className="annual-print-document print-only">
         {printPages.map((pageRows, pageIndex) => (
           <section className="annual-print-page" key={`print-page-${pageIndex}`}>
+            <div className="annual-print-page-number">หน้า {pageIndex + 1} จาก {printPages.length}</div>
             <header className="annual-print-header">
               <div className="annual-print-agency">เทศบาลเมืองตาคลี</div>
               <div className="annual-print-heading">รายละเอียดผู้ชำระภาษี (กค.)</div>
@@ -904,7 +907,6 @@ const handleInlineAdd = async () => {
               })}</tbody>
               {pageIndex === printPages.length - 1 && <tfoot><tr><td colSpan={3}>รวม {filtered.length} ราย</td><td className="number-cell">฿{formatCurrency(landTotal)}</td><td colSpan={2}></td><td className="number-cell">฿{formatCurrency(signTotal)}</td><td colSpan={2}></td><td className="number-cell">฿{formatCurrency(landTotal + signTotal)}</td><td></td></tr></tfoot>}
             </table>
-            <footer className="annual-print-page-number">หน้า {pageIndex + 1} จาก {printPages.length}</footer>
           </section>
         ))}
       </div>
