@@ -20,6 +20,8 @@ interface AppState {
   currentUser: User | null
   users: User[]
   taxpayers: Taxpayer[]
+  dataLoading: boolean
+  dataError: string | null
   selectedYear: number
   login: (username: string, password: string) => Promise<boolean>
   logout: () => void
@@ -46,17 +48,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<User | null>(() => getStoredUser())
   const [users, setUsers] = useState<User[]>([])
   const [taxpayers, setTaxpayers] = useState<Taxpayer[]>([])
+  const [dataLoading, setDataLoading] = useState(false)
+  const [dataError, setDataError] = useState<string | null>(null)
   const [selectedYear, setSelectedYearState] = useState(CURRENT_YEAR)
 
   const refreshData = useCallback(async () => {
-    const [usersData, taxpayersData, assessmentsData, paymentsData, followUpsData] =
-      await Promise.all([
+    setDataLoading(true)
+    setDataError(null)
+    try {
+      const [usersData, taxpayersData, assessmentsData, paymentsData, followUpsData] =
+        await Promise.all([
         getUsers(),
         getTaxpayers(),
         getTaxAssessments(),
         getAllocatedPayments(),
         getFollowUpLogs(),
-      ])
+        ])
 
     const assessmentsByTaxpayer = new Map<string, TaxAssessment[]>()
     const paymentsByTaxpayer = new Map<string, Payment[]>()
@@ -88,16 +95,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
       pushToMap(followUpsByTaxpayer, followUp.taxpayerId, followUp)
     }
 
-    setUsers(usersData)
-    setTaxpayers(
-      taxpayersData.map((taxpayer) => ({
+      setUsers(usersData)
+      setTaxpayers(
+        taxpayersData.map((taxpayer) => ({
         ...taxpayer,
         assessments: assessmentsByTaxpayer.get(taxpayer.id) ?? [],
         payments: paymentsByTaxpayer.get(taxpayer.id) ?? [],
         followUps: followUpsByTaxpayer.get(taxpayer.id) ?? [],
         notes: notesByTaxpayer.get(taxpayer.id) ?? '',
-      })),
-    )
+        })),
+      )
+    } catch (error) {
+      setDataError(error instanceof Error ? error.message : 'ไม่สามารถโหลดข้อมูลจากระบบได้')
+      throw error
+    } finally {
+      setDataLoading(false)
+    }
   }, [])
 
   const setSelectedYear = (year: number) => {
@@ -127,6 +140,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setCurrentUser(null)
     setUsers([])
     setTaxpayers([])
+    setDataError(null)
   }
 
   const addTaxpayer = (taxpayer: Taxpayer) => {
@@ -179,6 +193,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         currentUser,
         users,
         taxpayers,
+        dataLoading,
+        dataError,
         selectedYear,
         login,
         logout,

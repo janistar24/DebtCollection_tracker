@@ -30,7 +30,7 @@ function ProtectedLayout() {
           <Routes>
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/taxpayers/new" element={
-              currentUser.role === 'director' ? <Navigate to="/taxpayers" replace /> : <AddTaxpayerPage />
+              <AddTaxpayerPage />
             } />
             <Route path="/taxpayers/manage" element={<ManageTaxpayersPage />} />
             <Route path="/taxpayers/manage/:id" element={<TaxpayerDetailPage />} />

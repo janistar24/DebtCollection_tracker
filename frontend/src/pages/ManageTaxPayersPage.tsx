@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useApp } from '../context/AppContext'
 import type { Taxpayer } from '../types'
@@ -6,17 +6,26 @@ import type { Taxpayer } from '../types'
 const nameOf = (tp: Taxpayer) => tp.type === 'company' ? tp.companyName ?? '' : `${tp.firstName} ${tp.lastName}`
 
 export default function ManageTaxpayersPage() {
-  const { taxpayers, currentUser } = useApp()
+  const { taxpayers, currentUser, dataLoading, dataError, refreshData } = useApp()
   const navigate = useNavigate()
   const canWrite = currentUser != null
   const [search, setSearch] = useState('')
   const [type, setType] = useState('all')
+  const [page, setPage] = useState(1)
+  const pageSize = 60
   const rows = useMemo(() => taxpayers.filter(tp => {
     if (currentUser?.role === 'officer' && tp.group !== currentUser.group) return false
     if (type !== 'all' && tp.type !== type) return false
     const q = search.trim().toLowerCase()
     return !q || nameOf(tp).toLowerCase().includes(q) || tp.ownerCode.toLowerCase().includes(q) || tp.phone.includes(q)
   }).sort((a, b) => nameOf(a).localeCompare(nameOf(b), 'th')), [taxpayers, currentUser, search, type])
+  const pageCount = Math.max(1, Math.ceil(rows.length / pageSize))
+  const visibleRows = rows.slice((page - 1) * pageSize, page * pageSize)
+
+  useEffect(() => setPage(1), [search, type, currentUser?.role, currentUser?.group])
+  useEffect(() => {
+    if (page > pageCount) setPage(pageCount)
+  }, [page, pageCount])
 
   return <div style={{ padding: 24, maxWidth: 1300 }}>
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 18 }}>
@@ -28,8 +37,16 @@ export default function ManageTaxpayersPage() {
       <select className="input-field" value={type} onChange={e => setType(e.target.value)} style={{ width: 170 }}><option value="all">ทุกประเภทบุคคล</option><option value="individual">บุคคลธรรมดา</option><option value="company">นิติบุคคล</option></select>
       <span style={{ alignSelf: 'center', color: '#8873b5', fontSize: 12 }}>{rows.length} ราย</span>
     </div>
+    {dataLoading && taxpayers.length === 0 ? (
+      <div className="glass-card" style={{ padding: 40, textAlign: 'center', color: '#6b5b95' }}>กำลังโหลดทะเบียนผู้เสียภาษี...</div>
+    ) : dataError && taxpayers.length === 0 ? (
+      <div className="glass-card" style={{ padding: 32, textAlign: 'center' }}>
+        <div style={{ color: '#c0392b', marginBottom: 12 }}>{dataError}</div>
+        <button className="btn-primary" onClick={() => void refreshData()}>โหลดข้อมูลอีกครั้ง</button>
+      </div>
+    ) : <>
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(285px,1fr))', gap: 14 }}>
-      {rows.map(tp => <div key={tp.id} className="glass-card" style={{ padding: 18 }}>
+      {visibleRows.map(tp => <div key={tp.id} className="glass-card" style={{ padding: 18 }}>
         <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}><div style={{ width: 42, height: 42, borderRadius: 13, background: '#eee8fb', display: 'grid', placeItems: 'center', fontSize: 19 }}>{tp.type === 'company' ? '🏢' : '👤'}</div><div><div style={{ fontWeight: 700 }}>{nameOf(tp)}</div><div style={{ fontSize: 11, color: '#a89cc8' }}>{tp.ownerCode || 'นิติบุคคล'} · กลุ่ม {tp.group}</div></div></div>
         <div style={{ marginTop: 13, color: '#6b5b95', fontSize: 12, lineHeight: 1.8 }}>☎ {tp.phone || '-'}<br/>⌂ {tp.address || '-'}</div>
         <div style={{ display: 'flex', gap: 6, marginTop: 14, paddingTop: 12, borderTop: '1px solid rgba(200,190,240,.25)' }}>
@@ -39,5 +56,11 @@ export default function ManageTaxpayersPage() {
         </div>
       </div>)}
     </div>
+    {pageCount > 1 && <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 10, marginTop: 20 }}>
+      <button className="btn-secondary" disabled={page === 1} onClick={() => setPage(value => Math.max(1, value - 1))}>ก่อนหน้า</button>
+      <span style={{ fontSize: 12, color: '#6b5b95' }}>หน้า {page} จาก {pageCount}</span>
+      <button className="btn-secondary" disabled={page === pageCount} onClick={() => setPage(value => Math.min(pageCount, value + 1))}>ถัดไป</button>
+    </div>}
+    </>}
   </div>
 }
