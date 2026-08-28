@@ -113,7 +113,7 @@ export default function SearchPaymentPage() {
   const slipInputRef = useRef<HTMLInputElement>(null)
 
   const isDirector = currentUser?.role !== 'officer'
-  const canRecordPayment = currentUser?.role !== 'director'
+  const canRecordPayment = currentUser != null
   const GROUPS = ['ก-น', 'บ-ล', 'ส-ศ', 'ว-ฮ และบริษัท']
 
   const runSearch = () => {

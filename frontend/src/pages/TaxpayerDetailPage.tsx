@@ -151,7 +151,7 @@ const localDateTimeNow = () => {
 export default function TaxpayerDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { taxpayers, users, addFollowUp, addPayment, updateTaxpayer, removeTaxpayer, currentUser, selectedYear, refreshData } = useApp()
-  const canWrite = currentUser?.role !== 'director'
+  const canWrite = currentUser != null
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const tp = taxpayers.find(t => t.id === id)

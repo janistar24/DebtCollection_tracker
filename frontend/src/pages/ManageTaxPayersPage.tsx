@@ -8,7 +8,7 @@ const nameOf = (tp: Taxpayer) => tp.type === 'company' ? tp.companyName ?? '' : 
 export default function ManageTaxpayersPage() {
   const { taxpayers, currentUser } = useApp()
   const navigate = useNavigate()
-  const canWrite = currentUser?.role !== 'director'
+  const canWrite = currentUser != null
   const [search, setSearch] = useState('')
   const [type, setType] = useState('all')
   const rows = useMemo(() => taxpayers.filter(tp => {

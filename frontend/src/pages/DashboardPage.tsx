@@ -648,7 +648,7 @@ export default function DashboardPage() {
 
   const isDirector = currentUser?.role === 'director' || currentUser?.role === 'admin'
   const isAdmin = currentUser?.role === 'admin'
-  const canWrite = currentUser?.role !== 'director'
+  const canWrite = currentUser != null
   const myTaxpayers = isDirector ? taxpayers : taxpayers.filter(tp => tp.group === currentUser?.group)
 
   const totalCount = myTaxpayers.filter(tp => !!tp.assessments.find(a => a.year === selectedYear)).length

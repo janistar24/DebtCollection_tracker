@@ -57,7 +57,7 @@ export default function TaxpayerListPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const isDirector = currentUser?.role === 'director' || currentUser?.role === 'admin'
-  const canWrite = currentUser?.role !== 'director'
+  const canWrite = currentUser != null
   const openedYears = taxpayers.flatMap(tp => tp.assessments.map(a => a.year))
   const latestOpenedYear = openedYears.length > 0 ? Math.max(CURRENT_YEAR, ...openedYears) : CURRENT_YEAR
   const isCurrentYear = selectedYear === latestOpenedYear
