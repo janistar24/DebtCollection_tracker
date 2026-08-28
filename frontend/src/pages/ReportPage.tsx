@@ -8,6 +8,7 @@ import { getMonthlyPaymentReport } from '../api/reports'
 
 const GROUPS = ['ก-น', 'บ-ล', 'ส-ศ', 'ว-ฮ และบริษัท'] as const
 const MONTHS = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.']
+const REPORT_PRINT_ROWS_PER_PAGE = 24
 
 export default function ReportPage() {
   const { taxpayers, users, currentUser, selectedYear } = useApp()
@@ -39,6 +40,13 @@ export default function ReportPage() {
   const paidCount = filtered.filter(tp => getPaymentStatus(tp, selectedYear) === 'paid').length
   const partialCount = filtered.filter(tp => getPaymentStatus(tp, selectedYear) === 'partial').length
   const unpaidCount = filtered.filter(tp => getPaymentStatus(tp, selectedYear) === 'unpaid').length
+  const reportPrintPages = useMemo(() => {
+    const pages: Taxpayer[][] = []
+    for (let index = 0; index < filtered.length; index += REPORT_PRINT_ROWS_PER_PAGE) {
+      pages.push(filtered.slice(index, index + REPORT_PRINT_ROWS_PER_PAGE))
+    }
+    return pages
+  }, [filtered])
   useEffect(() => {
     let cancelled = false
     void getMonthlyPaymentReport(selectedYear, groupFilter).then(rows => {
@@ -55,6 +63,7 @@ export default function ReportPage() {
 
   const currentMonth = new Date().toISOString().slice(0, 7)
   const paidThisMonth = filtered.filter(tp => tp.payments.some(payment => payment.date.startsWith(currentMonth))).length
+  const paidThisMonthPercent = filtered.length > 0 ? paidThisMonth / filtered.length * 100 : 0
   const statusData = [
     { name: 'ชำระครบ', value: paidCount, color: '#6f4db5' },
     { name: 'ชำระบางส่วน', value: partialCount, color: '#c3b2ef' },
@@ -83,7 +92,7 @@ export default function ReportPage() {
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#333' }}><span>ปีภาษี: <b>{selectedYear}</b> · {groupLabel}</span><span>วันที่ออกรายงาน: <b>{formatDate(today)}</b> · ผู้จัดทำ: <b>{currentUser?.name}</b></span></div>
     </div>
 
-    <section style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 18, flexWrap: 'wrap', padding: '18px 20px', marginBottom: 14, borderRadius: 16, color: '#fff', background: 'linear-gradient(135deg,#7048b3,#9a7ad1)' }}>
+    <section className="report-overview" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 18, flexWrap: 'wrap', padding: '18px 20px', marginBottom: 14, borderRadius: 16, color: '#fff', background: 'linear-gradient(135deg,#7048b3,#9a7ad1)' }}>
       <div><div style={{ fontSize: 11, opacity: .82 }}>ภาพรวมกลุ่มที่เลือก · ปีภาษี {selectedYear}</div><div style={{ fontSize: 25, fontWeight: 800, marginTop: 4 }}>{groupLabel}</div></div>
       <div style={{ display: 'flex', gap: 26, flexWrap: 'wrap' }}><Meta label="ผู้รับผิดชอบ" value={officer} /><Meta label="ผู้เสียภาษีในกลุ่ม" value={`${filtered.length} ราย`} /><Meta label="ปรับปรุงข้อมูลล่าสุด" value={formatDate(today)} /></div>
     </section>
@@ -132,15 +141,37 @@ export default function ReportPage() {
         <div style={{ minHeight: 205, display: 'grid', placeItems: 'center' }}>
           <div style={{ width: '100%', maxWidth: 340 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 14 }}><span style={{ color: '#6b5b95', fontSize: 13 }}>ผู้ชำระภาษีในเดือนนี้</span><b style={{ color: '#7c5cbf', fontSize: 24 }}>{paidThisMonth} ราย</b></div>
-            <div style={{ height: 10, background: '#eee9f8', borderRadius: 99, overflow: 'hidden' }}><div style={{ width: `${filtered.length ? paidThisMonth / filtered.length * 100 : 0}%`, height: '100%', background: '#7c5cbf' }} /></div>
-            <div style={{ color: '#a89cc8', fontSize: 11, marginTop: 9, textAlign: 'right' }}>คิดเป็น {filtered.length ? Math.round(paidThisMonth / filtered.length * 100) : 0}% ของผู้เสียภาษีตามเงื่อนไข</div>
+            <div className="report-current-progress-track no-print"><div className="report-current-progress-fill" style={{ width: `${paidThisMonthPercent}%` }} /></div>
+            <svg className="report-current-progress-svg print-only" viewBox="0 0 100 8" preserveAspectRatio="none" aria-hidden="true"><rect className="progress-track" x="0" y="0" width="100" height="8" rx="4"/><rect className="progress-fill" x="0" y="0" width={Math.max(0.2, paidThisMonthPercent)} height="8" rx="4"/></svg>
+            <div style={{ color: '#a89cc8', fontSize: 11, marginTop: 9, textAlign: 'right' }}>คิดเป็น {formatPercent(paidThisMonthPercent)} ของผู้เสียภาษีตามเงื่อนไข</div>
           </div>
         </div>
       </div>
       </div>
     </section>
 
-    <div className="glass-card no-print" style={{ padding: 0, overflow: 'hidden' }}><div style={{ padding: '14px 20px', borderBottom: '1px solid rgba(200,190,240,.25)', display: 'flex', justifyContent: 'space-between' }}><b>รายละเอียดผู้เสียภาษี</b><span style={{ fontSize: 12, color: '#a89cc8' }}>{filtered.length} รายการ · ตารางนี้ไม่รวมอยู่ในเอกสารรายงานที่พิมพ์</span></div>{filtered.length === 0 ? <EmptyState icon="📊" title="ไม่พบข้อมูลตามเงื่อนไขที่กำหนด" /> : <div style={{ overflowX: 'auto' }}><table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}><thead><tr style={{ background: 'rgba(240,236,251,.5)' }}>{['#','รหัส','ชื่อ','ประเภทภาษี','ยอดประเมิน','ยอดชำระ','ยอดคงเหลือ','ผู้รับผิดชอบ','สถานะ'].map(h => <th key={h} style={TH}>{h}</th>)}</tr></thead><tbody>{filtered.map((tp, i) => { const a=tp.assessments.find(x=>x.year===selectedYear); const assessed=getTotalAssessed(tp,selectedYear); const remaining=getTotalRemaining(tp,selectedYear); const taxTypes=[a?.landAmount?'ภาษีที่ดินและสิ่งปลูกสร้าง':null,a?.signAmount?'ป้าย':null].filter(Boolean).join('+'); return <tr key={tp.id} style={{ borderBottom:'1px solid rgba(200,190,240,.15)' }}><td style={TD}>{i+1}</td><td style={{...TD,fontFamily:'monospace',fontSize:11,color:'#7c5cbf'}}>{tp.ownerCode}</td><td style={TD}>{getTaxpayerName(tp)}</td><td style={TD}>{taxTypes||'-'}</td><td style={{...TD,textAlign:'right'}}>฿{formatCurrency(assessed)}</td><td style={{...TD,textAlign:'right',color:'#1a8f5a'}}>฿{formatCurrency(assessed-remaining)}</td><td style={{...TD,textAlign:'right',color:remaining?'#c0392b':'#1a8f5a'}}>฿{formatCurrency(remaining)}</td><td style={TD}>{users.find(user => user.id === tp.responsibleOfficer)?.name??'-'}</td><td style={TD}><StatusBadge status={getPaymentStatus(tp,selectedYear)} size="sm" /></td></tr> })}</tbody><tfoot><tr style={{background:'rgba(240,236,251,.5)',fontWeight:700}}><td colSpan={4} style={TD}>รวม {filtered.length} ราย</td><td style={{...TD,textAlign:'right'}}>฿{formatCurrency(totalAssessed)}</td><td style={{...TD,textAlign:'right',color:'#1a8f5a'}}>฿{formatCurrency(totalPaid)}</td><td style={{...TD,textAlign:'right',color:'#c0392b'}}>฿{formatCurrency(totalRemaining)}</td><td colSpan={2} /></tr></tfoot></table></div>}</div>
+    <div className="glass-card no-print" style={{ padding: 0, overflow: 'hidden' }}><div style={{ padding: '14px 20px', borderBottom: '1px solid rgba(200,190,240,.25)', display: 'flex', justifyContent: 'space-between' }}><b>รายละเอียดผู้เสียภาษี</b><span style={{ fontSize: 12, color: '#a89cc8' }}>{filtered.length} รายการ</span></div>{filtered.length === 0 ? <EmptyState icon="📊" title="ไม่พบข้อมูลตามเงื่อนไขที่กำหนด" /> : <div style={{ overflowX: 'auto' }}><table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}><thead><tr style={{ background: 'rgba(240,236,251,.5)' }}>{['#','รหัส','ชื่อ','ประเภทภาษี','ยอดประเมิน','ยอดชำระ','ยอดคงเหลือ','ผู้รับผิดชอบ','สถานะ'].map(h => <th key={h} style={TH}>{h}</th>)}</tr></thead><tbody>{filtered.map((tp, i) => { const a=tp.assessments.find(x=>x.year===selectedYear); const assessed=getTotalAssessed(tp,selectedYear); const remaining=getTotalRemaining(tp,selectedYear); const taxTypes=[a?.landAmount?'ภาษีที่ดินและสิ่งปลูกสร้าง':null,a?.signAmount?'ป้าย':null].filter(Boolean).join('+'); return <tr key={tp.id} style={{ borderBottom:'1px solid rgba(200,190,240,.15)' }}><td style={TD}>{i+1}</td><td style={{...TD,fontFamily:'monospace',fontSize:11,color:'#7c5cbf'}}>{tp.ownerCode}</td><td style={TD}>{getTaxpayerName(tp)}</td><td style={TD}>{taxTypes||'-'}</td><td style={{...TD,textAlign:'right'}}>฿{formatCurrency(assessed)}</td><td style={{...TD,textAlign:'right',color:'#1a8f5a'}}>฿{formatCurrency(assessed-remaining)}</td><td style={{...TD,textAlign:'right',color:remaining?'#c0392b':'#1a8f5a'}}>฿{formatCurrency(remaining)}</td><td style={TD}>{users.find(user => user.id === tp.responsibleOfficer)?.name??'-'}</td><td style={TD}><StatusBadge status={getPaymentStatus(tp,selectedYear)} size="sm" /></td></tr> })}</tbody><tfoot><tr style={{background:'rgba(240,236,251,.5)',fontWeight:700}}><td colSpan={4} style={TD}>รวม {filtered.length} ราย</td><td style={{...TD,textAlign:'right'}}>฿{formatCurrency(totalAssessed)}</td><td style={{...TD,textAlign:'right',color:'#1a8f5a'}}>฿{formatCurrency(totalPaid)}</td><td style={{...TD,textAlign:'right',color:'#c0392b'}}>฿{formatCurrency(totalRemaining)}</td><td colSpan={2} /></tr></tfoot></table></div>}</div>
+
+    <div className="report-print-details print-only">
+      {reportPrintPages.map((pageRows, pageIndex) => <section className="report-print-detail-page" key={`report-detail-${pageIndex}`}>
+        <div className="report-print-detail-page-number">หน้ารายละเอียด {pageIndex + 1} จาก {reportPrintPages.length}</div>
+        <header className="report-print-detail-header"><b>เทศบาลเมืองตาคลี</b><strong>รายละเอียดผู้เสียภาษี ประจำปี {selectedYear}</strong><span>{groupLabel} · จำนวนทั้งสิ้น {filtered.length} ราย</span></header>
+        <table className="report-print-detail-table">
+          <colgroup><col className="detail-no"/><col className="detail-code"/><col className="detail-name"/><col className="detail-type"/><col className="detail-money"/><col className="detail-money"/><col className="detail-money"/><col className="detail-officer"/><col className="detail-status"/></colgroup>
+          <thead><tr>{['#','รหัส','ชื่อ-นามสกุล / บริษัท','ประเภทภาษี','ยอดประเมิน','ยอดชำระ','ยอดคงเหลือ','ผู้รับผิดชอบ','สถานะ'].map(label => <th key={label}>{label}</th>)}</tr></thead>
+          <tbody>{pageRows.map((tp, rowIndex) => {
+            const assessment = tp.assessments.find(item => item.year === selectedYear)
+            const assessed = getTotalAssessed(tp, selectedYear)
+            const remaining = getTotalRemaining(tp, selectedYear)
+            const status = getPaymentStatus(tp, selectedYear)
+            const taxTypes = [assessment?.landAmount ? 'ที่ดินฯ' : null, assessment?.signAmount ? 'ป้าย' : null].filter(Boolean).join(' + ') || '-'
+            const statusLabel = status === 'paid' ? 'ชำระครบ' : status === 'partial' ? 'ชำระบางส่วน' : 'ยังไม่ชำระ'
+            return <tr key={`report-print-${tp.id}`}><td>{pageIndex * REPORT_PRINT_ROWS_PER_PAGE + rowIndex + 1}</td><td>{tp.ownerCode || '-'}</td><td>{getTaxpayerName(tp)}</td><td>{taxTypes}</td><td className="money">฿{formatCurrency(assessed)}</td><td className="money">฿{formatCurrency(assessed - remaining)}</td><td className="money">฿{formatCurrency(remaining)}</td><td>{users.find(user => user.id === tp.responsibleOfficer)?.name ?? '-'}</td><td>{statusLabel}</td></tr>
+          })}</tbody>
+          {pageIndex === reportPrintPages.length - 1 && <tfoot><tr><td colSpan={4}>รวม {filtered.length} ราย</td><td className="money">฿{formatCurrency(totalAssessed)}</td><td className="money">฿{formatCurrency(totalPaid)}</td><td className="money">฿{formatCurrency(totalRemaining)}</td><td colSpan={2}></td></tr></tfoot>}
+        </table>
+      </section>)}
+    </div>
   </div>
 }
 
@@ -185,6 +216,12 @@ function formatCurrency(value: number) {
 
 function formatCompactCurrency(value: number) {
   return value.toLocaleString('th-TH', { maximumFractionDigits: 0 })
+}
+
+function formatPercent(value: number) {
+  if (value === 0) return '0%'
+  if (value < 1) return `${value.toFixed(1)}%`
+  return `${Math.round(value)}%`
 }
 
 function formatDate(date: string) {
