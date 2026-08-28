@@ -62,9 +62,9 @@ export default function ReportPage() {
   ]
   const monthlyMaximum = Math.max(1, ...monthlyPayments.flatMap(item => [item.land, item.sign]))
   const statusTotal = Math.max(1, paidCount + partialCount + unpaidCount)
-  const paidDegrees = paidCount / statusTotal * 360
-  const partialDegrees = partialCount / statusTotal * 360
-  const printedDonutBackground = `conic-gradient(#6f4db5 0deg ${paidDegrees}deg, #c3b2ef ${paidDegrees}deg ${paidDegrees + partialDegrees}deg, #ef999b ${paidDegrees + partialDegrees}deg 360deg)`
+  const paidPercent = paidCount / statusTotal * 100
+  const partialPercent = partialCount / statusTotal * 100
+  const unpaidPercent = unpaidCount / statusTotal * 100
   const groupLabel = groupFilter === 'all' ? 'ทุกกลุ่ม' : `กลุ่ม ${groupFilter}`
   const officer = groupFilter === 'all' ? 'ผู้รับผิดชอบทุกคน' : users.find(user => user.id === filtered[0]?.responsibleOfficer)?.name ?? currentUser?.name ?? '-'
 
@@ -115,7 +115,15 @@ export default function ReportPage() {
         <div style={TITLE}>สถานะการชำระของผู้เสียภาษี</div><div style={SUB}>จำนวนคน แยกตามสถานะปัจจุบัน</div>
         <div className="no-print" style={{ width: '100%', height: 205, position: 'relative' }}><ResponsiveContainer><PieChart><Pie isAnimationActive={false} data={statusData} dataKey="value" innerRadius="52%" outerRadius="82%" paddingAngle={2}>{statusData.map(item => <Cell key={item.name} fill={item.color} stroke="none" />)}</Pie><Tooltip formatter={(value, name) => [`${value} ราย`, name]} /></PieChart></ResponsiveContainer><div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', pointerEvents: 'none', fontSize: 15, fontWeight: 700 }}>{filtered.length} ราย</div></div>
         <div className="print-only report-print-status">
-          <div className="report-print-donut" style={{ background: printedDonutBackground }}><div>{filtered.length}<small>ราย</small></div></div>
+          <div className="report-print-donut">
+            <svg className="report-print-donut-svg" viewBox="0 0 100 100" aria-hidden="true">
+              <circle className="donut-track" cx="50" cy="50" r="38" pathLength="100" />
+              <circle className="donut-paid" cx="50" cy="50" r="38" pathLength="100" strokeDasharray={`${paidPercent} ${100 - paidPercent}`} strokeDashoffset="0" />
+              <circle className="donut-partial" cx="50" cy="50" r="38" pathLength="100" strokeDasharray={`${partialPercent} ${100 - partialPercent}`} strokeDashoffset={-paidPercent} />
+              <circle className="donut-unpaid" cx="50" cy="50" r="38" pathLength="100" strokeDasharray={`${unpaidPercent} ${100 - unpaidPercent}`} strokeDashoffset={-(paidPercent + partialPercent)} />
+            </svg>
+            <div>{filtered.length}<small>ราย</small></div>
+          </div>
         </div>
         <div style={{ display: 'flex', justifyContent: 'center', gap: 12, flexWrap: 'wrap', fontSize: 11, color: '#6b5b95' }}>{statusData.map(item => <span key={item.name}><i style={{ display: 'inline-block', width: 9, height: 9, borderRadius: 3, background: item.color, marginRight: 5 }} />{item.name} <b>{item.value}</b></span>)}</div>
       </div>

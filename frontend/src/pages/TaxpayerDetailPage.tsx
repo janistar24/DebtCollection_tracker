@@ -386,8 +386,8 @@ export default function TaxpayerDetailPage() {
         <div>
           {/* Profile card */}
           <div className="glass-card" style={{ padding: '22px 26px', marginBottom: 20 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
-              <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+            <div className="taxpayer-profile-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+              <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', minWidth: 0, flex: 1 }}>
                 <div style={{
                   width: 50, height: 50, borderRadius: 14, background: 'linear-gradient(135deg,#c4b5f0,#9b7dd4)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, color: 'white', flexShrink: 0
@@ -397,7 +397,7 @@ export default function TaxpayerDetailPage() {
                   <div style={{ fontSize: 12, color: '#a89cc8', fontFamily: 'monospace' }}>{tp.ownerCode}</div>
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: 8 }}><button className="btn-secondary" onClick={() => setEditing({ ...tp })}>✏️ แก้ไขข้อมูล</button><button className="btn-ghost" style={{ color: '#c0392b' }} onClick={() => handleDeleteMaster(tp)}>🗑 ลบข้อมูลผู้เสียภาษี</button><StatusBadge status={payStat} /></div>
+              <div className="taxpayer-profile-actions"><button className="btn-secondary taxpayer-profile-action" onClick={() => setEditing({ ...tp })}>✏️ แก้ไขข้อมูล</button><button className="btn-ghost taxpayer-profile-action taxpayer-delete-action" onClick={() => handleDeleteMaster(tp)}>🗑 ลบข้อมูลผู้เสียภาษี</button><StatusBadge status={payStat} /></div>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, fontSize: 13 }}>
               <div><div style={{ fontSize: 11, color: '#a89cc8', marginBottom: 2 }}>หมายเลขโทรศัพท์</div><div style={{ fontWeight: 500 }}>{tp.phone}</div></div>

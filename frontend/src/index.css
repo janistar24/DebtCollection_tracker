@@ -225,6 +225,38 @@ select.input-field {
 .tag-decrease { background: #fff0f0; color: #c0392b; }
 .tag-same { background: #f4f4f8; color: #7c8090; }
 
+.taxpayer-profile-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-shrink: 0;
+  gap: 6px;
+}
+
+.taxpayer-profile-action {
+  min-height: 34px;
+  padding: 7px 9px !important;
+  font-size: 11.5px !important;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.taxpayer-delete-action {
+  color: #c0392b !important;
+}
+
+@media (max-width: 900px) {
+  .taxpayer-profile-header {
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .taxpayer-profile-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
 .print-only { display: none; }
 @media print {
   @page { size: A4 portrait; margin: 7mm; }
@@ -526,18 +558,30 @@ select.input-field {
     position: relative;
     width: 105px;
     height: 105px;
-    border-radius: 50%;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
 
-  .report-print-donut::after {
-    content: '';
-    position: absolute;
-    inset: 24px;
-    border-radius: 50%;
-    background: #fff !important;
+  .report-print-donut-svg {
+    display: block;
+    width: 105px;
+    height: 105px;
+    transform: rotate(-90deg);
+    overflow: visible;
   }
+
+  .report-print-donut-svg circle {
+    fill: none;
+    stroke-width: 18;
+    stroke-linecap: butt;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .report-print-donut-svg .donut-track { stroke: #eeeaf6 !important; }
+  .report-print-donut-svg .donut-paid { stroke: #6f4db5 !important; }
+  .report-print-donut-svg .donut-partial { stroke: #c3b2ef !important; }
+  .report-print-donut-svg .donut-unpaid { stroke: #ef999b !important; }
 
   .report-print-donut > div {
     position: absolute;
