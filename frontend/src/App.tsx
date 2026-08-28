@@ -22,11 +22,11 @@ function ProtectedLayout() {
   if (!currentUser) return <Navigate to="/login" replace />
 
   return (
-    <div style={{ display: 'flex', width: '100%', height: '100vh', overflow: 'hidden', background: 'radial-gradient(ellipse at 15% 10%, rgba(196,181,240,0.18) 0%, transparent 40%), radial-gradient(ellipse at 85% 85%, rgba(218,237,248,0.22) 0%, transparent 40%), #f8f7ff' }}>
+    <div className="app-shell" style={{ display: 'flex', width: '100%', height: '100vh', overflow: 'hidden', background: 'radial-gradient(ellipse at 15% 10%, rgba(196,181,240,0.18) 0%, transparent 40%), radial-gradient(ellipse at 85% 85%, rgba(218,237,248,0.22) 0%, transparent 40%), #f8f7ff' }}>
       <Sidebar collapsed={collapsed} onToggle={() => setCollapsed(c => !c)} />
-      <div style={{ flex: 1, height: '100vh', display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
+      <div className="app-main-column" style={{ flex: 1, height: '100vh', display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
         <Header pathname={location.pathname} />
-        <main style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', WebkitOverflowScrolling: 'touch' }}>
+        <main className="app-main-content" style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', WebkitOverflowScrolling: 'touch' }}>
           <Routes>
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/taxpayers/new" element={

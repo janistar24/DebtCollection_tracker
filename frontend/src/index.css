@@ -232,6 +232,17 @@ select.input-field {
   .print-only { display: block !important; }
   html, body, #root { height: auto !important; width: auto !important; overflow: visible !important; }
   body { background: white; color: #000; }
+  .app-shell,
+  .app-main-column,
+  .app-main-content {
+    display: block !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    position: static !important;
+  }
   main { overflow: visible !important; }
   .glass-card, .glass-sidebar, .glass-header { background: white; border: 1px solid #ddd; box-shadow: none; }
 
@@ -251,6 +262,9 @@ select.input-field {
   .annual-print-document {
     display: block !important;
     width: 100% !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
   }
 
   .annual-print-page {
@@ -263,6 +277,7 @@ select.input-field {
     page-break-after: always;
     font-family: 'Sarabun', 'Noto Sans Thai', sans-serif !important;
     color: #000 !important;
+    overflow: visible !important;
   }
 
   .annual-print-page:last-child {
