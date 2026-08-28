@@ -9,6 +9,7 @@ from starlette.responses import JSONResponse
 os.environ.setdefault("AUTH_SECRET", "test-secret-that-is-at-least-32-characters-long")
 
 import main
+from fastapi import HTTPException
 
 
 def request_for(path: str, method: str = "POST") -> Request:
@@ -25,6 +26,18 @@ def request_for(path: str, method: str = "POST") -> Request:
 
 
 class AuthorizationTests(unittest.IsolatedAsyncioTestCase):
+    def test_only_director_and_admin_can_permanently_delete_taxpayer(self):
+        for role in ("DIRECTOR", "ADMIN"):
+            request = request_for("/api/taxpayers/1", "DELETE")
+            request.state.user = {"sub": 1, "role": role, "group": None}
+            main._require_permanent_delete_permission(request)
+
+        officer_request = request_for("/api/taxpayers/1", "DELETE")
+        officer_request.state.user = {"sub": 3, "role": "OFFICER", "group": "ก-น"}
+        with self.assertRaises(HTTPException) as context:
+            main._require_permanent_delete_permission(officer_request)
+        self.assertEqual(context.exception.status_code, 403)
+
     @patch("main.authenticated_user", return_value={"sub": 2})
     @patch.object(main.db, "fetch_one")
     async def test_director_can_write_payment(self, fetch_one, _authenticated):

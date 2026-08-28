@@ -371,26 +371,42 @@ class Taxpayers:
         return {"Is Error": False, "Error Message": ""}
 
     def delete(self, taxpayer_id):
-        # ห้ามลบเมื่อมีการชำระเงินที่จัดสรรแล้ว เพื่อรักษาประวัติทางการเงิน
-        data, _ = self.db.fetch(
-            """
-            SELECT pa.allocation_id
-            FROM public.payment_allocations pa
-            JOIN public.tax_assessments ta ON ta.assessment_id = pa.assessment_id
-            JOIN public.taxpayer_year_records tyr ON tyr.year_record_id = ta.year_record_id
-            WHERE tyr.taxpayer_id = %s
-            LIMIT 1
-            """,
-            (taxpayer_id,)
-        )
-        if data:
-            return {
-                "Is Error": True,
-                "Error Message": "ไม่สามารถลบได้ เนื่องจากผู้เสียภาษีรายนี้มีประวัติการชำระเงินแล้ว"
-            }
-
-        # ไม่มีการชำระเงิน: ลบข้อมูลลูกและ master ใน transaction เดียว
+        # ลบข้อมูลที่สัมพันธ์ทั้งหมดใน transaction เดียว การตรวจสิทธิ์ทำที่ API
+        # payment หนึ่งรายการอาจจัดสรรได้หลาย assessment จึงลบ payment เฉพาะเมื่อ
+        # ไม่มี allocation ของผู้เสียภาษีรายอื่นเหลืออยู่แล้วเท่านั้น
         with self.db.transaction() as cursor:
+            cursor.execute(
+                """
+                SELECT ta.assessment_id
+                FROM public.tax_assessments ta
+                JOIN public.taxpayer_year_records tyr
+                  ON tyr.year_record_id = ta.year_record_id
+                WHERE tyr.taxpayer_id = %s
+                """,
+                (taxpayer_id,),
+            )
+            assessment_ids = [row[0] for row in cursor.fetchall()]
+
+            payment_ids = []
+            if assessment_ids:
+                cursor.execute(
+                    """
+                    SELECT DISTINCT payment_id
+                    FROM public.payment_allocations
+                    WHERE assessment_id = ANY(%s)
+                    """,
+                    (assessment_ids,),
+                )
+                payment_ids = [row[0] for row in cursor.fetchall()]
+                cursor.execute(
+                    "DELETE FROM public.tax_notices WHERE assessment_id = ANY(%s)",
+                    (assessment_ids,),
+                )
+                cursor.execute(
+                    "DELETE FROM public.payment_allocations WHERE assessment_id = ANY(%s)",
+                    (assessment_ids,),
+                )
+
             cursor.execute(
                 "DELETE FROM public.follow_up_logs WHERE year_record_id IN (SELECT year_record_id FROM public.taxpayer_year_records WHERE taxpayer_id = %s)",
                 (taxpayer_id,)
@@ -400,7 +416,33 @@ class Taxpayers:
                 (taxpayer_id,)
             )
             cursor.execute("DELETE FROM public.taxpayer_year_records WHERE taxpayer_id = %s", (taxpayer_id,))
-            cursor.execute("DELETE FROM public.taxpayers WHERE taxpayer_id = %s", (taxpayer_id,))
+            cursor.execute("DELETE FROM public.taxpayers WHERE taxpayer_id = %s RETURNING taxpayer_id", (taxpayer_id,))
+            if cursor.fetchone() is None:
+                return {"Is Error": True, "Error Message": f"ไม่พบผู้เสียภาษีรหัส {taxpayer_id}"}
+
+            if payment_ids:
+                cursor.execute(
+                    """
+                    DELETE FROM public.payment_slips ps
+                    WHERE ps.payment_id = ANY(%s)
+                      AND NOT EXISTS (
+                        SELECT 1 FROM public.payment_allocations pa
+                        WHERE pa.payment_id = ps.payment_id
+                      )
+                    """,
+                    (payment_ids,),
+                )
+                cursor.execute(
+                    """
+                    DELETE FROM public.payments p
+                    WHERE p.payment_id = ANY(%s)
+                      AND NOT EXISTS (
+                        SELECT 1 FROM public.payment_allocations pa
+                        WHERE pa.payment_id = p.payment_id
+                      )
+                    """,
+                    (payment_ids,),
+                )
         return {"Is Error": False, "Error Message": ""}
 
     # FIND TAXPAYER BY OWNER CODE

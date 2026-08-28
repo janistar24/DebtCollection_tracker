@@ -130,6 +130,14 @@ def _require_group(request: Request, group_code: str | None) -> None:
         raise HTTPException(status_code=403, detail="ไม่มีสิทธิ์เข้าถึงข้อมูลของกลุ่มนี้")
 
 
+def _require_permanent_delete_permission(request: Request) -> None:
+    if _actor(request).get("role") not in {"DIRECTOR", "ADMIN"}:
+        raise HTTPException(
+            status_code=403,
+            detail="การลบข้อมูลผู้เสียภาษีอย่างถาวรดำเนินการได้เฉพาะผู้บริหารหรือผู้ดูแลระบบเท่านั้น",
+        )
+
+
 def _taxpayer_group(taxpayer_id: int) -> str:
     row, columns = db.fetch_one(
         "SELECT group_code FROM public.taxpayers WHERE taxpayer_id=%s",
@@ -1096,6 +1104,7 @@ def reactivate_taxpayer(taxpayer_id: int, request: Request):
 
 @app.delete("/api/taxpayers/{taxpayer_id}")
 def delete_taxpayer(taxpayer_id: int, request: Request):
+    _require_permanent_delete_permission(request)
     _require_group(request, _taxpayer_group(taxpayer_id))
     result = taxpayers_service.delete(taxpayer_id)
     if result["Is Error"]:

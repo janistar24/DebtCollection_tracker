@@ -152,6 +152,7 @@ export default function TaxpayerDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { taxpayers, users, addFollowUp, addPayment, updateTaxpayer, removeTaxpayer, currentUser, selectedYear, refreshData } = useApp()
   const canWrite = currentUser != null
+  const canDeletePermanently = currentUser?.role === 'director' || currentUser?.role === 'admin'
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const tp = taxpayers.find(t => t.id === id)
@@ -366,7 +367,15 @@ export default function TaxpayerDetailPage() {
   }
 
   async function handleDeleteMaster(target: Taxpayer) {
-    if (!confirm(`ลบ ${getTaxpayerName(target)} ออกจากฐานข้อมูลถาวรหรือไม่?`)) return
+    if (!canDeletePermanently) {
+      alert('การลบข้อมูลผู้เสียภาษีอย่างถาวรดำเนินการได้เฉพาะผู้บริหารหรือผู้ดูแลระบบเท่านั้น')
+      return
+    }
+    const hasPaymentHistory = target.payments.length > 0
+    const warning = hasPaymentHistory
+      ? `ผู้เสียภาษี “${getTaxpayerName(target)}” มีประวัติการชำระภาษีอยู่ในระบบ\n\nการดำเนินการนี้จะลบข้อมูลผู้เสียภาษี รายการประเมิน ประวัติการติดตาม และประวัติการชำระที่เกี่ยวข้องออกจากฐานข้อมูลอย่างถาวร และไม่สามารถกู้คืนได้\n\nท่านยืนยันที่จะลบข้อมูลหรือไม่?`
+      : `ท่านต้องการลบข้อมูลผู้เสียภาษี “${getTaxpayerName(target)}” ออกจากฐานข้อมูลอย่างถาวรหรือไม่?\n\nข้อมูลที่เกี่ยวข้องทั้งหมดจะถูกลบและไม่สามารถกู้คืนได้`
+    if (!confirm(warning)) return
     try { await deleteTaxpayerMaster(Number(target.id)); removeTaxpayer(target.id); navigate('/taxpayers/manage') }
     catch (error) { alert(error instanceof Error ? error.message : 'ลบไม่สำเร็จ') }
   }
@@ -398,7 +407,7 @@ export default function TaxpayerDetailPage() {
                   <div style={{ fontSize: 12, color: '#a89cc8', fontFamily: 'monospace' }}>{tp.ownerCode}</div>
                 </div>
               </div>
-              <div className="taxpayer-profile-actions">{canWrite && <><button className="btn-secondary taxpayer-profile-action" onClick={() => setEditing({ ...tp })}>✏️ แก้ไขข้อมูล</button><button className="btn-ghost taxpayer-profile-action taxpayer-delete-action" onClick={() => handleDeleteMaster(tp)}>🗑 ลบข้อมูลผู้เสียภาษี</button></>}<StatusBadge status={payStat} /></div>
+              <div className="taxpayer-profile-actions">{canWrite && <button className="btn-secondary taxpayer-profile-action" onClick={() => setEditing({ ...tp })}>✏️ แก้ไขข้อมูล</button>}{canDeletePermanently && <button className="btn-ghost taxpayer-profile-action taxpayer-delete-action" onClick={() => handleDeleteMaster(tp)}>🗑 ลบข้อมูลถาวร</button>}<StatusBadge status={payStat} /></div>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, fontSize: 13 }}>
               <div><div style={{ fontSize: 11, color: '#a89cc8', marginBottom: 2 }}>หมายเลขโทรศัพท์</div><div style={{ fontWeight: 500 }}>{tp.phone}</div></div>
@@ -506,7 +515,7 @@ export default function TaxpayerDetailPage() {
             <div><label style={LBL}>กลุ่มผู้รับผิดชอบ *</label><select className="input-field" value={editing.group} onChange={e => setEditing({...editing, group:e.target.value as Taxpayer['group']})}><option>ก-น</option><option>บ-ล</option><option>ส-ศ</option><option>ว-ฮ และบริษัท</option></select></div>
             <div style={{gridColumn:'1/-1'}}><label style={LBL}>ที่อยู่ *</label><textarea className="input-field" rows={3} value={editing.address} required onChange={e => setEditing({...editing, address:e.target.value})}/></div>
           </div>
-          <div style={{display:'flex',justifyContent:'space-between',gap:8,marginTop:20,paddingTop:16,borderTop:'1px solid rgba(200,190,240,.25)'}}><button type="button" className="btn-ghost" style={{color:'#c0392b'}} onClick={() => handleDeleteMaster(editing)}>🗑 ลบข้อมูลผู้เสียภาษี</button><div style={{display:'flex',gap:8}}><button type="button" className="btn-secondary" onClick={() => setEditing(null)}>ยกเลิก</button><button type="submit" className="btn-primary" disabled={masterSaving}>{masterSaving ? 'กำลังบันทึก...' : '💾 บันทึกข้อมูล'}</button></div></div>
+          <div style={{display:'flex',justifyContent:'space-between',gap:8,marginTop:20,paddingTop:16,borderTop:'1px solid rgba(200,190,240,.25)'}}>{canDeletePermanently ? <button type="button" className="btn-ghost" style={{color:'#c0392b'}} onClick={() => handleDeleteMaster(editing)}>🗑 ลบข้อมูลถาวร</button> : <span />}<div style={{display:'flex',gap:8}}><button type="button" className="btn-secondary" onClick={() => setEditing(null)}>ยกเลิก</button><button type="submit" className="btn-primary" disabled={masterSaving}>{masterSaving ? 'กำลังบันทึก...' : '💾 บันทึกข้อมูล'}</button></div></div>
         </form>
       </Modal>}
       {canWrite && showFollowModal && (

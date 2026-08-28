@@ -9,6 +9,7 @@ export default function ManageTaxpayersPage() {
   const { taxpayers, currentUser, dataLoading, dataError, refreshData } = useApp()
   const navigate = useNavigate()
   const canWrite = currentUser != null
+  const canDeletePermanently = currentUser?.role === 'director' || currentUser?.role === 'admin'
   const [search, setSearch] = useState('')
   const [type, setType] = useState('all')
   const [page, setPage] = useState(1)
@@ -52,7 +53,7 @@ export default function ManageTaxpayersPage() {
         <div style={{ display: 'flex', gap: 6, marginTop: 14, paddingTop: 12, borderTop: '1px solid rgba(200,190,240,.25)' }}>
           <button className="btn-secondary" style={{ flex: 1, fontSize: 11 }} onClick={() => navigate(`/taxpayers/manage/${tp.id}`)}>ตรวจสอบรายละเอียด</button>
           {canWrite && <><button className="btn-ghost" style={{ fontSize: 11 }} onClick={() => navigate(`/taxpayers/manage/${tp.id}?edit=1`)}>แก้ไข</button>
-          <button className="btn-ghost" style={{ fontSize: 11, color: '#c0392b' }} onClick={() => navigate(`/taxpayers/manage/${tp.id}?delete=1`)}>ลบ</button></>}
+          {canDeletePermanently && <button className="btn-ghost" style={{ fontSize: 11, color: '#c0392b' }} onClick={() => navigate(`/taxpayers/manage/${tp.id}?delete=1`)}>ลบข้อมูลถาวร</button>}</>}
         </div>
       </div>)}
     </div>
