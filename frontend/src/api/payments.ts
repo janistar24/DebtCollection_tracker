@@ -1,5 +1,5 @@
 import type { Payment, PayMethod } from '../types'
-import { API_URL } from './config'
+import { API_URL, readApiJson } from './config'
 
 interface CompletePaymentInput {
   payment_amount: number
@@ -63,7 +63,7 @@ export async function createCompletePayment(data: CompletePaymentInput): Promise
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   })
-  const result = await response.json()
+  const result = await readApiJson(response)
   if (!response.ok || !result.success) {
     throw new Error(errorMessage(result, 'บันทึกการชำระไม่สำเร็จ'))
   }
@@ -72,7 +72,7 @@ export async function createCompletePayment(data: CompletePaymentInput): Promise
 
 export async function getAllocatedPayments(): Promise<Payment[]> {
   const response = await fetch(`${API_URL}/payment-allocations`)
-  const result = await response.json()
+  const result = await readApiJson(response)
   if (!response.ok || !result.success) {
     throw new Error(errorMessage(result, 'โหลดข้อมูลการชำระไม่สำเร็จ'))
   }

@@ -1,4 +1,4 @@
-import { API_URL } from './config'
+import { API_URL, readApiJson } from './config'
 
 export interface SlipReadResult {
   amount: number | null
@@ -16,7 +16,7 @@ export async function readPaymentSlip(file: File): Promise<SlipReadResult> {
     body: file,
   })
 
-  const result = await response.json()
+  const result = await readApiJson(response)
 
   if (!response.ok || !result.success) {
     const message = typeof result.detail === 'string'

@@ -150,7 +150,8 @@ const localDateTimeNow = () => {
 
 export default function TaxpayerDetailPage() {
   const { id } = useParams<{ id: string }>()
-  const { taxpayers, users, addFollowUp, addPayment, updateTaxpayer, removeTaxpayer, currentUser, refreshData } = useApp()
+  const { taxpayers, users, addFollowUp, addPayment, updateTaxpayer, removeTaxpayer, currentUser, selectedYear, refreshData } = useApp()
+  const canWrite = currentUser?.role !== 'director'
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const tp = taxpayers.find(t => t.id === id)
@@ -183,11 +184,11 @@ export default function TaxpayerDetailPage() {
   const [masterSaving, setMasterSaving] = useState(false)
 
   useEffect(() => {
-    if (tp && searchParams.get('edit') === '1') {
+    if (canWrite && tp && searchParams.get('edit') === '1') {
       setEditing({ ...tp })
       setSearchParams({}, { replace: true })
     }
-    if (tp && searchParams.get('delete') === '1') {
+    if (canWrite && tp && searchParams.get('delete') === '1') {
       setSearchParams({}, { replace: true })
       void handleDeleteMaster(tp)
     }
@@ -202,22 +203,22 @@ export default function TaxpayerDetailPage() {
   )
 
   const officer = users.find(user => user.id === tp.responsibleOfficer)
-  const payStat = getPaymentStatus(tp, CURRENT_YEAR)
-  const assess = tp.assessments.find(a => a.year === CURRENT_YEAR)
-  const landPaid = getLandPaid(tp, CURRENT_YEAR)
-  const signPaid = getSignPaid(tp, CURRENT_YEAR)
-  const landRem = getLandRemaining(tp, CURRENT_YEAR)
-  const signRem = getSignRemaining(tp, CURRENT_YEAR)
+  const payStat = getPaymentStatus(tp, selectedYear)
+  const assess = tp.assessments.find(a => a.year === selectedYear)
+  const landPaid = getLandPaid(tp, selectedYear)
+  const signPaid = getSignPaid(tp, selectedYear)
+  const landRem = getLandRemaining(tp, selectedYear)
+  const signRem = getSignRemaining(tp, selectedYear)
 
   // Build timeline
   const timeline: { date: string; icon: string; title: string; detail?: string; amount?: number }[] = [
-    ...(assess ? [{ date: `2569-01-15`, icon: '📋', title: `ประเมินภาษีปี ${CURRENT_YEAR}`, detail: `ภาษีที่ดินและสิ่งปลูกสร้าง ฿${formatCurrency(assess.landAmount)} · ป้าย ฿${formatCurrency(assess.signAmount)}` }] : []),
-    ...tp.followUps.map(fu => ({
+    ...(assess ? [{ date: `${selectedYear - 543}-01-15`, icon: '📋', title: `ประเมินภาษีปี ${selectedYear}`, detail: `ภาษีที่ดินและสิ่งปลูกสร้าง ฿${formatCurrency(assess.landAmount)} · ป้าย ฿${formatCurrency(assess.signAmount)}` }] : []),
+    ...tp.followUps.filter(fu => fu.taxYear === selectedYear).map(fu => ({
       date: fu.date, icon: CONTACT_ICONS[fu.type] ?? '📝',
       title: fu.type === 'phone' ? `โทรศัพท์ — ${CALL_RESULT_LABELS[fu.result ?? ''] ?? ''}` : fu.type === 'line' ? 'แจ้งผ่าน LINE' : 'ติดต่อ',
       detail: fu.detail + (fu.promiseDate ? ` · นัด ${formatDate(fu.promiseDate)}` : '') + (fu.nextFollowDate ? ` · ติดตามครั้งถัดไป ${formatDate(fu.nextFollowDate)}` : ''),
     })),
-    ...tp.payments.map(p => ({
+    ...tp.payments.filter(p => p.taxYear === selectedYear).map(p => ({
       date: p.date, icon: '💰',
       title: `รับชำระ ฿${formatCurrency(p.amount)}`,
       detail: `${p.method === 'transfer' ? 'โอนเงิน' : 'เงินสด'} · ${p.refNo ?? p.receiptNo ?? '-'}`,
@@ -230,7 +231,7 @@ export default function TaxpayerDetailPage() {
       setFuSaving(true)
       const followUpId = await createFollowUpLog({
         taxpayer_id: Number(tp.id),
-        tax_year: CURRENT_YEAR,
+        tax_year: selectedYear,
         tax_scope: 'BOTH',
         contact_type: fuType,
         contacted_at: fuDate,
@@ -245,7 +246,7 @@ export default function TaxpayerDetailPage() {
         id: followUpId, taxpayerId: tp.id, type: fuType, date: fuDate,
         result: fuResult as FollowUp['result'], detail: fuDetail,
         promiseDate: fuPromiseDate || undefined, promiseAmount: parseFloat(fuPromiseAmt) || undefined,
-        nextFollowDate: fuNextDate || undefined, recordedBy: currentUser?.id ?? '', taxYear: CURRENT_YEAR
+        nextFollowDate: fuNextDate || undefined, recordedBy: currentUser?.id ?? '', taxYear: selectedYear
       }
       addFollowUp(fu)
       setFuSaved(true)
@@ -289,10 +290,10 @@ export default function TaxpayerDetailPage() {
         id: paymentId, taxpayerId: tp.id, amount: amt,
         date: payDate, method: payMethod, refNo: payMethod === 'transfer' ? payRef : undefined,
         receiptNo: payMethod === 'cash' ? payReceipt : undefined,
-        allocatedLand: allocLand, allocatedSign: allocSign, recordedBy: currentUser?.id ?? '', taxYear: CURRENT_YEAR
+        allocatedLand: allocLand, allocatedSign: allocSign, recordedBy: currentUser?.id ?? '', taxYear: selectedYear
       }
       addPayment(pay)
-      await refreshData()
+      void refreshData().catch(error => console.error('รีเฟรชข้อมูลหลังบันทึกการชำระไม่สำเร็จ:', error))
       setPaySaved(true)
       setTimeout(() => { setPaySaved(false); setShowPayModal(false) }, 1200)
     } catch (error) {
@@ -397,7 +398,7 @@ export default function TaxpayerDetailPage() {
                   <div style={{ fontSize: 12, color: '#a89cc8', fontFamily: 'monospace' }}>{tp.ownerCode}</div>
                 </div>
               </div>
-              <div className="taxpayer-profile-actions"><button className="btn-secondary taxpayer-profile-action" onClick={() => setEditing({ ...tp })}>✏️ แก้ไขข้อมูล</button><button className="btn-ghost taxpayer-profile-action taxpayer-delete-action" onClick={() => handleDeleteMaster(tp)}>🗑 ลบข้อมูลผู้เสียภาษี</button><StatusBadge status={payStat} /></div>
+              <div className="taxpayer-profile-actions">{canWrite && <><button className="btn-secondary taxpayer-profile-action" onClick={() => setEditing({ ...tp })}>✏️ แก้ไขข้อมูล</button><button className="btn-ghost taxpayer-profile-action taxpayer-delete-action" onClick={() => handleDeleteMaster(tp)}>🗑 ลบข้อมูลผู้เสียภาษี</button></>}<StatusBadge status={payStat} /></div>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, fontSize: 13 }}>
               <div><div style={{ fontSize: 11, color: '#a89cc8', marginBottom: 2 }}>หมายเลขโทรศัพท์</div><div style={{ fontWeight: 500 }}>{tp.phone}</div></div>
@@ -464,7 +465,7 @@ export default function TaxpayerDetailPage() {
 
         {/* RIGHT: Actions */}
         <div style={{ position: 'sticky', top: 76 }}>
-          <div className="glass-card" style={{ padding: '20px', marginBottom: 16 }}>
+          {canWrite && <div className="glass-card" style={{ padding: '20px', marginBottom: 16 }}>
             <h4 style={{ margin: '0 0 14px', fontSize: 14, fontWeight: 700, color: '#2d2545' }}>การดำเนินการ</h4>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <button className="btn-primary" style={{ width: '100%' }} onClick={() => setShowFollowModal(true)}>
@@ -474,7 +475,7 @@ export default function TaxpayerDetailPage() {
                 💰 บันทึกการชำระ
               </button>
             </div>
-          </div>
+          </div>}
 
           <div className="glass-card" style={{ padding: '16px 18px' }}>
             <h4 style={{ margin: '0 0 12px', fontSize: 13, fontWeight: 700, color: '#2d2545' }}>สรุปยอดภาษี</h4>
@@ -492,7 +493,7 @@ export default function TaxpayerDetailPage() {
       </div>
 
       {/* Follow-up Modal */}
-      {editing && <Modal title="แก้ไขข้อมูลผู้เสียภาษี" onClose={() => setEditing(null)} maxWidth="680px">
+      {canWrite && editing && <Modal title="แก้ไขข้อมูลผู้เสียภาษี" onClose={() => setEditing(null)} maxWidth="680px">
         <div style={{ padding: '10px 14px', borderRadius: 10, background: 'rgba(240,236,251,.55)', color: '#6b5b95', fontSize: 12, marginBottom: 18 }}>
           แก้ไขข้อมูลหลักของผู้เสียภาษี ช่องที่มีเครื่องหมาย * จำเป็นต้องกรอก ข้อมูลที่บันทึกจะอัปเดตในฐานข้อมูลทันที
         </div>
@@ -508,7 +509,7 @@ export default function TaxpayerDetailPage() {
           <div style={{display:'flex',justifyContent:'space-between',gap:8,marginTop:20,paddingTop:16,borderTop:'1px solid rgba(200,190,240,.25)'}}><button type="button" className="btn-ghost" style={{color:'#c0392b'}} onClick={() => handleDeleteMaster(editing)}>🗑 ลบข้อมูลผู้เสียภาษี</button><div style={{display:'flex',gap:8}}><button type="button" className="btn-secondary" onClick={() => setEditing(null)}>ยกเลิก</button><button type="submit" className="btn-primary" disabled={masterSaving}>{masterSaving ? 'กำลังบันทึก...' : '💾 บันทึกข้อมูล'}</button></div></div>
         </form>
       </Modal>}
-      {showFollowModal && (
+      {canWrite && showFollowModal && (
         <Modal title="บันทึกการติดตาม" onClose={() => setShowFollowModal(false)}>
           {fuSaved ? (
             <div style={{ textAlign: 'center', padding: '24px 0' }}>
@@ -574,9 +575,9 @@ export default function TaxpayerDetailPage() {
       )}
 
       {/* Payment Modal */}
-      {showPayModal && (
+      {canWrite && showPayModal && (
         <Modal title="บันทึกการชำระ" onClose={() => setShowPayModal(false)}>
-          <PaymentForm key={`${tp.id}-${CURRENT_YEAR}`} taxpayer={tp} year={CURRENT_YEAR} onCancel={() => setShowPayModal(false)} onSuccess={() => setShowPayModal(false)} />
+          <PaymentForm key={`${tp.id}-${selectedYear}`} taxpayer={tp} year={selectedYear} onCancel={() => setShowPayModal(false)} onSuccess={() => setShowPayModal(false)} />
           {false && (paySaved ? (
             <div style={{ textAlign: 'center', padding: '24px 0' }}>
               <div style={{ fontSize: 36, marginBottom: 8 }}>✅</div>

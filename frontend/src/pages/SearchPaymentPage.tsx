@@ -113,6 +113,7 @@ export default function SearchPaymentPage() {
   const slipInputRef = useRef<HTMLInputElement>(null)
 
   const isDirector = currentUser?.role !== 'officer'
+  const canRecordPayment = currentUser?.role !== 'director'
   const GROUPS = ['ก-น', 'บ-ล', 'ส-ศ', 'ว-ฮ และบริษัท']
 
   const runSearch = () => {
@@ -356,7 +357,7 @@ export default function SearchPaymentPage() {
         recordedBy: currentUser?.id ?? '', taxYear: selectedYear
       }
       addPayment(pay)
-      await refreshData()
+      void refreshData().catch(error => console.error('รีเฟรชข้อมูลหลังบันทึกการชำระไม่สำเร็จ:', error))
       setSaved(true); showSuccessToast()
       setTimeout(() => {
         setSaved(false); setShowPayModal(false); setDrawerTp(null)
@@ -407,7 +408,7 @@ export default function SearchPaymentPage() {
         allocatedLand: allocLand, allocatedSign: allocSign,
         recordedBy: currentUser?.id ?? '', taxYear: selectedYear
       })
-      await refreshData()
+      void refreshData().catch(error => console.error('รีเฟรชข้อมูลหลังบันทึกการชำระไม่สำเร็จ:', error))
       setCashSaved(true); showSuccessToast()
       setTimeout(() => { setCashSaved(false); setShowCashModal(false); setCashTp(null); setCashSearch(''); setCashAmt('') }, 1400)
     } catch (error) {
@@ -438,11 +439,15 @@ export default function SearchPaymentPage() {
         <p style={{ margin: 0, fontSize: 13, color: '#a89cc8' }}>ตรวจสอบยอดเงินที่ได้รับ หรือบันทึกการชำระเมื่อทราบผู้ชำระเงิน</p>
       </div>
 
+      {!canRecordPayment && <div style={{ marginBottom: 16, padding: '10px 14px', borderRadius: 10, background: '#fff8e6', color: '#8a5a00', fontSize: 12 }}>
+        บัญชีผู้บริหารสามารถตรวจสอบและค้นหาข้อมูลได้ แต่ไม่สามารถบันทึกรายการชำระเงิน
+      </div>}
+
       {/* Tabs */}
       <div style={{ display: 'flex', gap: 4, marginBottom: 20, background: 'rgba(240,236,251,0.4)', borderRadius: 14, padding: 4, width: 'fit-content' }}>
         {[
           { key: 'search', label: 'ตรวจสอบจากยอดรับ', icon: '🔍', sub: 'ไม่ทราบผู้ชำระเงิน' },
-          { key: 'direct', label: 'บันทึกการชำระ', icon: '✅', sub: 'ทราบผู้ชำระเงิน' },
+          ...(canRecordPayment ? [{ key: 'direct', label: 'บันทึกการชำระ', icon: '✅', sub: 'ทราบผู้ชำระเงิน' }] : []),
         ].map(t => (
           <button key={t.key} onClick={() => setActiveTab(t.key as typeof activeTab)} style={{
             padding: '10px 20px', borderRadius: 10, cursor: 'pointer',
@@ -761,9 +766,9 @@ export default function SearchPaymentPage() {
                   </div>
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    <button className="btn-primary" onClick={() => setShowPayModal(true)} style={{ width: '100%' }}>
+                    {canRecordPayment && <button className="btn-primary" onClick={() => setShowPayModal(true)} style={{ width: '100%' }}>
                       ✅ ยืนยันว่าเป็นรายนี้
-                    </button>
+                    </button>}
                     <button className="btn-secondary" onClick={() => setDrawerTp(null)} style={{ width: '100%' }}>
                       ❌ ไม่ใช่รายนี้
                     </button>
@@ -776,7 +781,7 @@ export default function SearchPaymentPage() {
       )}
 
       {/* Confirm Payment Modal */}
-      {showPayModal && drawerTp && (
+      {canRecordPayment && showPayModal && drawerTp && (
         <Modal title="ยืนยันการชำระ" onClose={() => setShowPayModal(false)} maxWidth="500px">
           <PaymentForm key={`${drawerTp.id}-${selectedYear}-${payAmt}`} taxpayer={drawerTp} year={selectedYear} initialAmount={payAmt} initialMethod={payMethod} onCancel={() => setShowPayModal(false)} onSuccess={() => { showSuccessToast(); setShowPayModal(false); setDrawerTp(null); setCandidates(prev => prev.filter(c => c.tp.id !== drawerTp.id)) }} />
           {false && (saved ? (
@@ -862,7 +867,7 @@ export default function SearchPaymentPage() {
       )}
 
       {/* Cash payment modal */}
-      {showCashModal && (
+      {canRecordPayment && showCashModal && (
         <Modal title="บันทึกชำระเงินสด" onClose={() => setShowCashModal(false)} maxWidth="480px">
           {cashSaved ? (
             <div style={{ textAlign: 'center', padding: '28px 0' }}>
@@ -1010,7 +1015,7 @@ function DirectPaymentTab() {
         allocatedLand: allocLand, allocatedSign: allocSign,
         recordedBy: currentUser?.id ?? '', taxYear: selectedYear
       })
-      await refreshData()
+      void refreshData().catch(error => console.error('รีเฟรชข้อมูลหลังบันทึกการชำระไม่สำเร็จ:', error))
       setSaved(true); setToast(true)
       setTimeout(() => { setToast(false); setSaved(false); setSelectedTp(null); setSearch(''); setAmt(''); setRefNo(''); setReceiptNo('') }, 2000)
     } catch (error) {

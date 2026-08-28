@@ -104,6 +104,7 @@ export default function PaymentForm({ taxpayer, year, initialAmount, initialMeth
       const paymentId = await createCompletePayment({
         payment_amount: paymentAmount,
         payment_date: dateTime.slice(0, 10),
+        payment_datetime: new Date(dateTime).toISOString(),
         payment_method: method,
         reference_no: method === 'transfer' ? reference || null : null,
         receipt_no: method === 'cash' ? receipt || null : null,
@@ -125,7 +126,9 @@ export default function PaymentForm({ taxpayer, year, initialAmount, initialMeth
         recordedBy: currentUser?.id ?? '',
         taxYear: year,
       })
-      await refreshData()
+      // การบันทึกเสร็จสมบูรณ์ตั้งแต่ API ตอบกลับแล้ว ไม่ให้การโหลดข้อมูลชุดใหญ่
+      // ที่ช้าหรือล้มเหลวทำให้ผู้ใช้เข้าใจผิดว่ารายการชำระไม่ได้ถูกบันทึก
+      void refreshData().catch(error => console.error('รีเฟรชข้อมูลหลังบันทึกการชำระไม่สำเร็จ:', error))
       setSaved(true)
       setTimeout(() => onSuccess?.(), 900)
     } catch (error) {

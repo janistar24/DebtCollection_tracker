@@ -57,6 +57,7 @@ export default function TaxpayerListPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const isDirector = currentUser?.role === 'director' || currentUser?.role === 'admin'
+  const canWrite = currentUser?.role !== 'director'
   const openedYears = taxpayers.flatMap(tp => tp.assessments.map(a => a.year))
   const latestOpenedYear = openedYears.length > 0 ? Math.max(CURRENT_YEAR, ...openedYears) : CURRENT_YEAR
   const isCurrentYear = selectedYear === latestOpenedYear
@@ -760,16 +761,16 @@ const handleInlineAdd = async () => {
               ? `สร้างข้อมูลตั้งต้นจากปี ${sourceYear} จำนวน ${sourceTaxpayers.length} ราย โดยไม่กระทบข้อมูลปีเดิม`
               : `ไม่พบข้อมูลปี ${sourceYear} สำหรับใช้เป็นข้อมูลตั้งต้น`}
           </div>
-          <button
+          {canWrite ? <button
             className="btn-primary"
             disabled={sourceTaxpayers.length === 0}
             onClick={() => { setOpenYearError(''); setShowOpenYearModal(true) }}
           >
             เปิดรอบปี {selectedYear}
-          </button>
+          </button> : <div style={{ fontSize: 12, color: '#8a5a00' }}>บัญชีผู้บริหารสามารถตรวจสอบข้อมูลได้เท่านั้น</div>}
         </div>
 
-        {showOpenYearModal && (
+        {canWrite && showOpenYearModal && (
           <Modal title={`เปิดรอบปีภาษี ${selectedYear}`} onClose={() => !openingYear && setShowOpenYearModal(false)} maxWidth="560px">
             <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: 12, alignItems: 'end', marginBottom: 16 }}>
               <div>
@@ -847,7 +848,7 @@ const handleInlineAdd = async () => {
             <button className="btn-secondary no-print" onClick={() => exportExcel(filtered, selectedYear, groupFilter)} style={{ fontSize: 12 }}>📥 ส่งออกข้อมูล Excel</button>
           </>}
 
-          {!isDirector && isCurrentYear && !editMode && (
+          {canWrite && isCurrentYear && !editMode && (
             <button className="btn-secondary" onClick={() => { setEditMode(true); setPendingEdits({}) }}
               style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
               ✏️ แก้ไขข้อมูล

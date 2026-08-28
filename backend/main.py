@@ -7,6 +7,7 @@ from collections import defaultdict, deque
 from datetime import date, datetime
 from threading import Lock
 from time import monotonic
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -216,7 +217,9 @@ async def enforce_authentication(request: Request, call_next):
                 raise HTTPException(status_code=403, detail="ไม่มีสิทธิ์เข้าถึงข้อมูลส่วนนี้")
             if request.url.path.startswith("/api/users") and request.method != "GET" and user["role"] != "ADMIN":
                 raise HTTPException(status_code=403, detail="เฉพาะผู้ดูแลระบบเท่านั้น")
-            if request.method in {"POST", "PUT", "PATCH", "DELETE"} and user["role"] == "DIRECTOR":
+            director_read_only_post = request.url.path == "/api/slips/read"
+            if (request.method in {"POST", "PUT", "PATCH", "DELETE"}
+                    and user["role"] == "DIRECTOR" and not director_read_only_post):
                 raise HTTPException(status_code=403, detail="บัญชีผู้บริหารมีสิทธิ์ดูข้อมูลเท่านั้น")
         except HTTPException as error:
             return JSONResponse(status_code=error.status_code, content={"detail": error.detail})
@@ -706,7 +709,7 @@ class CompletePaymentCreate(BaseModel):
     payment_date: date
     # รองรับหน้าที่ส่งเฉพาะวันที่ และใช้เวลาปัจจุบันเป็นค่าเริ่มต้น
     payment_datetime: datetime | None = None
-    payment_method: str
+    payment_method: Literal["transfer", "cash", "TRANSFER", "CASH"]
     reference_no: str | None = None
     receipt_no: str | None = None
     recorded_by: int | None = None

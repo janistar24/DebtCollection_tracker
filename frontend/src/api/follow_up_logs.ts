@@ -1,5 +1,5 @@
 import type { FollowUp } from '../types'
-import { API_URL } from './config'
+import { API_URL, readApiJson } from './config'
 
 interface FollowUpApi {
   follow_up_id: number
@@ -34,7 +34,7 @@ const resultName = (value: string) =>
 
 export async function getFollowUpLogs(): Promise<FollowUp[]> {
   const response = await fetch(`${API_URL}/follow-up-logs`)
-  const result = await response.json()
+  const result = await readApiJson(response)
   if (!response.ok || !result.success) {
     throw new Error(result.detail?.message ?? 'โหลดประวัติการติดต่อไม่สำเร็จ')
   }
@@ -59,7 +59,7 @@ export async function createFollowUpLog(data: CreateFollowUpInput): Promise<stri
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   })
-  const result = await response.json()
+  const result = await readApiJson(response)
   if (!response.ok || !result.success) {
     const message = typeof result.detail === 'string'
       ? result.detail : result.detail?.message

@@ -648,6 +648,7 @@ export default function DashboardPage() {
 
   const isDirector = currentUser?.role === 'director' || currentUser?.role === 'admin'
   const isAdmin = currentUser?.role === 'admin'
+  const canWrite = currentUser?.role !== 'director'
   const myTaxpayers = isDirector ? taxpayers : taxpayers.filter(tp => tp.group === currentUser?.group)
 
   const totalCount = myTaxpayers.filter(tp => !!tp.assessments.find(a => a.year === selectedYear)).length
@@ -817,29 +818,29 @@ export default function DashboardPage() {
 
   // Quick Menu — เรียงตาม Flow ทวงหนี้
   const quickMenuItems = [
-    {
+    ...(canWrite ? [{
       step: '①',
       icon: '📞',
       label: 'ติดต่อผู้เสียภาษี',
       sub: 'เลือกผู้เสียภาษีและบันทึกผลการติดต่อ',
       action: () => setShowCallLog(true),
-    },
+    }] : []),
     {
-      step: '②',
+      step: canWrite ? '②' : '①',
       icon: '📋',
       label: 'ตรวจสอบรายการติดตามประจำวัน',
       sub: `${taskTaxpayers.length} รายการที่ต้องติดตามและดำเนินการต่อ`,
       action: () => document.getElementById('daily-task-list')?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
     },
     {
-      step: '③',
+      step: canWrite ? '③' : '②',
       icon: '💳',
       label: 'ตรวจสอบยอดเงินเข้า',
-      sub: 'ค้นหาเจ้าของยอดและบันทึกการชำระ',
+      sub: canWrite ? 'ค้นหาเจ้าของยอดและบันทึกการชำระ' : 'ค้นหาและตรวจสอบเจ้าของยอด',
       action: () => navigate('/search-payment'),
     },
     {
-      step: '④',
+      step: canWrite ? '④' : '③',
       icon: '📊',
       label: 'รายงาน',
       sub: 'ตรวจสอบผลการติดตามและยอดรับชำระ',
@@ -1455,7 +1456,7 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {showCallLog && (
+      {canWrite && showCallLog && (
         <CallLogModal
           onClose={() => setShowCallLog(false)}
           onSave={handleCallLogSave}
