@@ -60,6 +60,11 @@ export default function ReportPage() {
     { name: 'ชำระบางส่วน', value: partialCount, color: '#c3b2ef' },
     { name: 'ยังไม่ชำระ', value: unpaidCount, color: '#ef999b' },
   ]
+  const monthlyMaximum = Math.max(1, ...monthlyPayments.flatMap(item => [item.land, item.sign]))
+  const statusTotal = Math.max(1, paidCount + partialCount + unpaidCount)
+  const paidDegrees = paidCount / statusTotal * 360
+  const partialDegrees = partialCount / statusTotal * 360
+  const printedDonutBackground = `conic-gradient(#6f4db5 0deg ${paidDegrees}deg, #c3b2ef ${paidDegrees}deg ${paidDegrees + partialDegrees}deg, #ef999b ${paidDegrees + partialDegrees}deg 360deg)`
   const groupLabel = groupFilter === 'all' ? 'ทุกกลุ่ม' : `กลุ่ม ${groupFilter}`
   const officer = groupFilter === 'all' ? 'ผู้รับผิดชอบทุกคน' : users.find(user => user.id === filtered[0]?.responsibleOfficer)?.name ?? currentUser?.name ?? '-'
 
@@ -90,12 +95,28 @@ export default function ReportPage() {
     <section className="report-visualizations" style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 14, marginBottom: 18 }}>
       <div className="glass-card report-monthly-chart" style={{ padding: '18px 20px', minWidth: 0 }}>
         <div style={TITLE}>ยอดรับชำระรายเดือน แยกตามประเภทภาษี</div><div style={SUB}>เปรียบเทียบยอดของภาษีแต่ละประเภทในเดือนเดียวกัน (บาท)</div>
-        <div className="report-monthly-canvas" style={{ width: '100%', height: 280 }}><ResponsiveContainer><BarChart data={monthlyPayments} margin={{ top: 8, right: 8, left: 6 }}><CartesianGrid strokeDasharray="3 3" stroke="rgba(180,165,210,.25)" vertical={false} /><XAxis dataKey="month" tick={{ fontSize: 11, fill: '#8873b5' }} tickLine={false} /><YAxis tick={{ fontSize: 11, fill: '#8873b5' }} axisLine={false} tickLine={false} width={62} tickFormatter={value => Number(value).toLocaleString('th-TH')} label={{ value: 'บาท', angle: -90, position: 'insideLeft', fill: '#8873b5', fontSize: 11 }} /><Tooltip formatter={(value, name) => [`฿${formatCurrency(Number(value))}`, name]} contentStyle={{ fontFamily: "'Sarabun',sans-serif", fontSize: 12, borderRadius: 10 }} /><Legend wrapperStyle={{ fontSize: 11 }} /><Bar isAnimationActive={false} dataKey="land" name="ภาษีที่ดินและสิ่งปลูกสร้าง" fill="#7c5cbf" radius={[5,5,0,0]} maxBarSize={26} /><Bar isAnimationActive={false} dataKey="sign" name="ภาษีป้าย" fill="#b9a6eb" radius={[5,5,0,0]} maxBarSize={26} /></BarChart></ResponsiveContainer></div>
+        <div className="report-monthly-canvas no-print" style={{ width: '100%', height: 280 }}><ResponsiveContainer><BarChart data={monthlyPayments} margin={{ top: 8, right: 8, left: 6 }}><CartesianGrid strokeDasharray="3 3" stroke="rgba(180,165,210,.25)" vertical={false} /><XAxis dataKey="month" tick={{ fontSize: 11, fill: '#8873b5' }} tickLine={false} /><YAxis tick={{ fontSize: 11, fill: '#8873b5' }} axisLine={false} tickLine={false} width={62} tickFormatter={value => Number(value).toLocaleString('th-TH')} label={{ value: 'บาท', angle: -90, position: 'insideLeft', fill: '#8873b5', fontSize: 11 }} /><Tooltip formatter={(value, name) => [`฿${formatCurrency(Number(value))}`, name]} contentStyle={{ fontFamily: "'Sarabun',sans-serif", fontSize: 12, borderRadius: 10 }} /><Legend wrapperStyle={{ fontSize: 11 }} /><Bar isAnimationActive={false} dataKey="land" name="ภาษีที่ดินและสิ่งปลูกสร้าง" fill="#7c5cbf" radius={[5,5,0,0]} maxBarSize={26} /><Bar isAnimationActive={false} dataKey="sign" name="ภาษีป้าย" fill="#b9a6eb" radius={[5,5,0,0]} maxBarSize={26} /></BarChart></ResponsiveContainer></div>
+        <div className="print-only report-print-monthly">
+          <div className="report-print-scale"><span>สูงสุด ฿{formatCompactCurrency(monthlyMaximum)}</span></div>
+          <div className="report-print-bars">
+            {monthlyPayments.map(item => <div className="report-print-month" key={item.month}>
+              <div className="report-print-bar-area">
+                <div className="report-print-bar report-print-bar-land" style={{ height: `${item.land > 0 ? Math.max(2, item.land / monthlyMaximum * 100) : 0}%` }}>{item.land > 0 && <span>{formatCompactCurrency(item.land)}</span>}</div>
+                <div className="report-print-bar report-print-bar-sign" style={{ height: `${item.sign > 0 ? Math.max(2, item.sign / monthlyMaximum * 100) : 0}%` }}>{item.sign > 0 && <span>{formatCompactCurrency(item.sign)}</span>}</div>
+              </div>
+              <div className="report-print-month-label">{item.month}</div>
+            </div>)}
+          </div>
+          <div className="report-print-legend"><span><i className="land" />ภาษีที่ดินและสิ่งปลูกสร้าง</span><span><i className="sign" />ภาษีป้าย</span></div>
+        </div>
       </div>
       <div className="report-bottom-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(300px,1fr) minmax(300px,1fr)', gap: 14 }}>
       <div className="glass-card report-status-chart" style={{ padding: '18px 20px', minWidth: 0 }}>
         <div style={TITLE}>สถานะการชำระของผู้เสียภาษี</div><div style={SUB}>จำนวนคน แยกตามสถานะปัจจุบัน</div>
-        <div style={{ width: '100%', height: 205, position: 'relative' }}><ResponsiveContainer><PieChart><Pie isAnimationActive={false} data={statusData} dataKey="value" innerRadius="52%" outerRadius="82%" paddingAngle={2}>{statusData.map(item => <Cell key={item.name} fill={item.color} stroke="none" />)}</Pie><Tooltip formatter={(value, name) => [`${value} ราย`, name]} /></PieChart></ResponsiveContainer><div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', pointerEvents: 'none', fontSize: 15, fontWeight: 700 }}>{filtered.length} ราย</div></div>
+        <div className="no-print" style={{ width: '100%', height: 205, position: 'relative' }}><ResponsiveContainer><PieChart><Pie isAnimationActive={false} data={statusData} dataKey="value" innerRadius="52%" outerRadius="82%" paddingAngle={2}>{statusData.map(item => <Cell key={item.name} fill={item.color} stroke="none" />)}</Pie><Tooltip formatter={(value, name) => [`${value} ราย`, name]} /></PieChart></ResponsiveContainer><div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', pointerEvents: 'none', fontSize: 15, fontWeight: 700 }}>{filtered.length} ราย</div></div>
+        <div className="print-only report-print-status">
+          <div className="report-print-donut" style={{ background: printedDonutBackground }}><div>{filtered.length}<small>ราย</small></div></div>
+        </div>
         <div style={{ display: 'flex', justifyContent: 'center', gap: 12, flexWrap: 'wrap', fontSize: 11, color: '#6b5b95' }}>{statusData.map(item => <span key={item.name}><i style={{ display: 'inline-block', width: 9, height: 9, borderRadius: 3, background: item.color, marginRight: 5 }} />{item.name} <b>{item.value}</b></span>)}</div>
       </div>
       <div className="glass-card report-current-month" style={{ padding: '18px 20px', minWidth: 0 }}>
@@ -152,6 +173,10 @@ function getPaymentStatus(tp: Taxpayer, taxYear: number): 'paid' | 'partial' | '
 
 function formatCurrency(value: number) {
   return value.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+function formatCompactCurrency(value: number) {
+  return value.toLocaleString('th-TH', { maximumFractionDigits: 0 })
 }
 
 function formatDate(date: string) {

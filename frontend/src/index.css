@@ -270,11 +270,14 @@ select.input-field {
   .annual-print-page {
     position: relative;
     width: 100%;
-    min-height: 282mm;
-    padding-bottom: 9mm;
+    height: auto !important;
+    min-height: 0 !important;
+    padding-bottom: 0;
     box-sizing: border-box;
     break-after: page;
     page-break-after: always;
+    break-inside: avoid;
+    page-break-inside: avoid;
     font-family: 'Sarabun', 'Noto Sans Thai', sans-serif !important;
     color: #000 !important;
     overflow: visible !important;
@@ -419,6 +422,138 @@ select.input-field {
 
   .report-monthly-canvas {
     height: 220px !important;
+  }
+
+  .report-print-monthly {
+    position: relative;
+    height: 150px;
+    margin-top: 4px;
+    padding: 12px 6px 25px 42px;
+    border-bottom: 1px solid #777;
+    box-sizing: border-box;
+  }
+
+  .report-print-scale {
+    position: absolute;
+    top: 3px;
+    left: 0;
+    font-size: 6.5pt;
+    color: #555 !important;
+  }
+
+  .report-print-bars {
+    display: flex;
+    align-items: stretch;
+    justify-content: space-between;
+    height: 112px;
+    border-bottom: 1px solid #777;
+  }
+
+  .report-print-month {
+    display: flex;
+    flex: 1 1 0;
+    min-width: 0;
+    flex-direction: column;
+    justify-content: flex-end;
+    align-items: center;
+  }
+
+  .report-print-bar-area {
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 2px;
+    width: 100%;
+    height: 100px;
+  }
+
+  .report-print-bar {
+    position: relative;
+    width: 28%;
+    min-width: 2px;
+    max-width: 14px;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .report-print-bar > span {
+    position: absolute;
+    top: -11px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 5.2pt;
+    white-space: nowrap;
+    color: #333 !important;
+  }
+
+  .report-print-bar-land { background: #6f4db5 !important; }
+  .report-print-bar-sign { background: #b9a6eb !important; }
+
+  .report-print-month-label {
+    margin-top: 3px;
+    font-size: 6.5pt;
+    white-space: nowrap;
+  }
+
+  .report-print-legend {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-top: 7px;
+    font-size: 6.5pt;
+  }
+
+  .report-print-legend i {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    margin-right: 4px;
+    vertical-align: -1px;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .report-print-legend .land { background: #6f4db5 !important; }
+  .report-print-legend .sign { background: #b9a6eb !important; }
+
+  .report-print-status {
+    display: grid !important;
+    place-items: center;
+    height: 130px;
+  }
+
+  .report-print-donut {
+    position: relative;
+    width: 105px;
+    height: 105px;
+    border-radius: 50%;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .report-print-donut::after {
+    content: '';
+    position: absolute;
+    inset: 24px;
+    border-radius: 50%;
+    background: #fff !important;
+  }
+
+  .report-print-donut > div {
+    position: absolute;
+    z-index: 1;
+    inset: 0;
+    display: grid;
+    place-content: center;
+    text-align: center;
+    font-size: 11pt;
+    font-weight: 700;
+  }
+
+  .report-print-donut small {
+    display: block;
+    font-size: 6pt;
+    font-weight: 400;
   }
 
   .report-bottom-grid {
