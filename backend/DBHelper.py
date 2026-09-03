@@ -72,6 +72,18 @@ class DBHelper:
             with self._pool_lock:
                 self._connection_count = max(0, self._connection_count - 1)
             return self._acquire()
+
+        # Railway/PostgreSQL อาจปิด TCP connection ที่ไม่มีการใช้งาน แม้ psycopg
+        # ยังรายงานว่า object ไม่ได้ closed ตรวจจริงก่อนส่ง connection ให้ API ใช้
+        # เพื่อให้ request แรกหลังระบบ idle สามารถ reconnect ได้โดยอัตโนมัติ
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT 1")
+                cursor.fetchone()
+            connection.rollback()
+        except (psycopg.OperationalError, psycopg.InterfaceError):
+            self._discard(connection)
+            return self._acquire()
         return connection
 
     def _discard(self, connection: psycopg.Connection) -> None:

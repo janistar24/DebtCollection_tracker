@@ -255,7 +255,17 @@ def home():
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok"}
+    try:
+        row, _ = db.fetch_one("SELECT 1 AS database_ready")
+        if row is None or row[0] != 1:
+            raise RuntimeError("database readiness check returned an invalid result")
+        return {"status": "ok", "database": "connected"}
+    except Exception:
+        logger.exception("Database readiness check failed")
+        return JSONResponse(
+            status_code=503,
+            content={"status": "unavailable", "database": "disconnected"},
+        )
 
 @app.get("/api/database-test")
 def database_test():
