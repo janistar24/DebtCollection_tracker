@@ -4,7 +4,7 @@ import StatusBadge from '../components/StatusBadge'
 import Modal from '../components/Modal'
 import EmptyState from '../components/EmptyState'
 import type { User } from '../types'
-import { createUser, deleteUser, inviteUserByEmail, resetUserPassword, setUserActive, updateUserRecord } from '../api/users'
+import { createUser, createUserInvitation, deleteUser, resetUserPassword, setUserActive, updateUserRecord } from '../api/users'
 
 const GROUPS = ['ก-น', 'บ-ล', 'ส-ศ', 'ว-ฮ และบริษัท']
 const ROLES = { officer: 'เจ้าหน้าที่ผู้รับผิดชอบ', director: 'ผู้บริหาร', admin: 'ผู้ดูแลระบบ' }
@@ -16,6 +16,7 @@ export default function AdminUsersPage() {
   const [editUser, setEditUser] = useState<User | null>(null)
   const [form, setForm] = useState(EMPTY)
   const [createMode, setCreateMode] = useState<'password' | 'email'>('password')
+  const [invitationLink, setInvitationLink] = useState('')
   const [resetTarget, setResetTarget] = useState<User | null>(null)
   const [activeTarget, setActiveTarget] = useState<User | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<User | null>(null)
@@ -49,8 +50,9 @@ export default function AdminUsersPage() {
         updateUser({ ...editUser, code: payload.employee_code, name: `${firstName} ${lastName}`, username: payload.username, email: form.email.trim() || undefined, role: form.role as User['role'], group: form.role === 'officer' ? form.group : undefined, active: form.active })
         notify('success', 'ปรับปรุงข้อมูลบัญชีผู้ใช้งานเรียบร้อยแล้ว')
       } else if (createMode === 'email') {
-        await inviteUserByEmail({ employee_code: payload.employee_code, first_name: firstName, last_name: lastName, email: form.email.trim(), role: payload.role, group_code: payload.group_code })
-        notify('success', `ส่งคำเชิญไปยัง ${form.email.trim()} แล้ว ผู้รับจะตั้งชื่อผู้ใช้งานและรหัสผ่านเอง`)
+        const link = await createUserInvitation({ employee_code: payload.employee_code, first_name: firstName, last_name: lastName, email: form.email.trim(), role: payload.role, group_code: payload.group_code })
+        setInvitationLink(link)
+        notify('success', 'สร้างลิงก์คำเชิญเรียบร้อยแล้ว')
       } else {
         const id = await createUser({ ...payload, password: form.password })
         addUser({ id, code: payload.employee_code, name: `${firstName} ${lastName}`, username: payload.username, email: form.email.trim() || undefined, role: form.role as User['role'], group: form.role === 'officer' ? form.group : undefined, active: form.active })
@@ -114,7 +116,7 @@ export default function AdminUsersPage() {
 
     {showForm && <Modal title={editUser ? 'แก้ไขข้อมูลผู้ใช้งาน' : 'เพิ่มผู้ใช้งาน'} onClose={() => !busy && setShowForm(false)} maxWidth="650px">
       <p style={SUB}>กำหนดข้อมูลบัญชีและขอบเขตสิทธิ์ให้สอดคล้องกับหน้าที่รับผิดชอบ</p>
-      {!editUser && <div style={{ display: 'flex', gap: 8, marginTop: 15 }}><button className={createMode === 'password' ? 'btn-primary' : 'btn-secondary'} onClick={() => setCreateMode('password')}>กำหนดรหัสผ่านให้</button><button className={createMode === 'email' ? 'btn-primary' : 'btn-secondary'} onClick={() => setCreateMode('email')}>ส่งคำเชิญทางอีเมล</button></div>}
+      {!editUser && <div style={{ display: 'flex', gap: 8, marginTop: 15 }}><button className={createMode === 'password' ? 'btn-primary' : 'btn-secondary'} onClick={() => setCreateMode('password')}>กำหนดรหัสผ่านให้</button><button className={createMode === 'email' ? 'btn-primary' : 'btn-secondary'} onClick={() => setCreateMode('email')}>สร้างลิงก์คำเชิญ</button></div>}
       <div style={{ display: 'grid', gap: 15, marginTop: 16 }}>
         <div style={GRID}><Field label="รหัสพนักงาน *"><input className="input-field" value={form.code} disabled={!!editUser} onChange={e => setForm({ ...form, code: e.target.value })} /></Field><Field label="ชื่อ-นามสกุล *"><input className="input-field" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field></div>
         <div style={GRID}>{(editUser || createMode === 'password') && <Field label="ชื่อผู้ใช้งาน *"><input className="input-field" autoComplete="off" value={form.username} onChange={e => setForm({ ...form, username: e.target.value })} /></Field>}<Field label={`อีเมล ${!editUser && createMode === 'email' ? '*' : '(ไม่บังคับ)'}`}><input className="input-field" type="email" autoComplete="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></Field></div>
@@ -123,6 +125,15 @@ export default function AdminUsersPage() {
         <div style={INFO}>{form.role === 'officer' ? 'เจ้าหน้าที่จะเข้าถึงข้อมูลเฉพาะกลุ่มที่ได้รับมอบหมาย' : `${ROLES[form.role as keyof typeof ROLES]}สามารถเข้าถึงข้อมูลภาพรวมของทุกกลุ่ม`}</div>
       </div>
       <Actions busy={busy} disabled={!form.code.trim() || !form.name.trim() || ((editUser || createMode === 'password') && !form.username.trim()) || (!editUser && createMode === 'password' && form.password.length < 12) || (!editUser && createMode === 'email' && !form.email.trim())} confirm={editUser ? 'บันทึกการแก้ไข' : createMode === 'email' ? 'ส่งคำเชิญ' : 'บันทึกบัญชี'} cancel={() => setShowForm(false)} run={save} />
+    </Modal>}
+
+    {invitationLink && <Modal title="สร้างลิงก์คำเชิญเรียบร้อยแล้ว" onClose={() => setInvitationLink('')} maxWidth="620px">
+      <p style={SUB}>คัดลอกลิงก์ด้านล่างแล้วส่งให้ผู้ใช้งานโดยตรง ลิงก์ใช้ได้ครั้งเดียวและหมดอายุภายใน 48 ชั่วโมง</p>
+      <div style={{ display: 'flex', gap: 9, marginTop: 16, alignItems: 'stretch' }}>
+        <input className="input-field" readOnly value={invitationLink} onFocus={e => e.currentTarget.select()} />
+        <button className="btn-primary" style={{ whiteSpace: 'nowrap' }} onClick={async () => { await navigator.clipboard.writeText(invitationLink); notify('success', 'คัดลอกลิงก์คำเชิญแล้ว') }}>คัดลอกลิงก์</button>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 22 }}><button className="btn-primary" onClick={() => setInvitationLink('')}>เสร็จสิ้น</button></div>
     </Modal>}
 
     {resetTarget && <Modal title="รีเซ็ตรหัสผ่าน" onClose={() => !busy && setResetTarget(null)}><p style={SUB}>กำหนดรหัสผ่านชั่วคราวใหม่สำหรับ <strong>{resetTarget.username}</strong></p><div style={{ marginTop: 16 }}><Field label="รหัสผ่านชั่วคราวใหม่ *"><input className="input-field" autoFocus type="password" autoComplete="new-password" placeholder="อย่างน้อย 12 ตัวอักษร" value={newPassword} onChange={e => setNewPassword(e.target.value)} /></Field></div><Actions busy={busy} disabled={newPassword.length < 12} confirm="ยืนยันการรีเซ็ต" cancel={() => setResetTarget(null)} run={resetPassword} /></Modal>}

@@ -101,8 +101,9 @@ export interface InviteUserInput {
   group_code: string | null
 }
 
-export async function inviteUserByEmail(data: InviteUserInput) {
-  return userMutation(`${API_URL}/users/invitations`, 'POST', data)
+export async function createUserInvitation(data: InviteUserInput): Promise<string> {
+  const result = await userMutation(`${API_URL}/users/invitations`, 'POST', data)
+  return String(result.data.invitation_url)
 }
 
 export interface InvitationDetails {

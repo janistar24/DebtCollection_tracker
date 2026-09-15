@@ -30,7 +30,6 @@ from taxpayer_year_records import Taxpayer_year_records
 from payment_allocations import Payment_allocations
 from slip_ocr import read_slip
 from auth_security import authenticated_user, create_access_token
-from mailer import send_user_invitation
 
 is_production = os.getenv("ENVIRONMENT", "development").lower() == "production"
 
@@ -473,21 +472,10 @@ def create_user_invitation(payload: AdminUserInvitation, http_request: Request):
                  token_hash, datetime.now(timezone.utc) + timedelta(hours=expires_hours), _actor_id(http_request)),
             )
             invitation_id = cursor.fetchone()[0]
-        try:
-            send_user_invitation(email, f"{payload.first_name.strip()} {payload.last_name.strip()}", url, expires_hours)
-        except Exception:
-            logger.exception("Could not send user invitation %s", invitation_id)
-            with db.transaction() as cursor:
-                cursor.execute(
-                    "UPDATE public.user_invitations SET revoked_at=CURRENT_TIMESTAMP WHERE invitation_id=%s",
-                    (invitation_id,),
-                )
-            raise HTTPException(status_code=503, detail="บันทึกคำเชิญแล้วแต่ส่งอีเมลไม่สำเร็จ กรุณาตรวจสอบการตั้งค่า SMTP")
-        db.execute(
-            "UPDATE public.user_invitations SET sent_at=CURRENT_TIMESTAMP WHERE invitation_id=%s",
-            (invitation_id,),
-        )
-        return {"success": True, "data": {"invitation_id": invitation_id, "email": email}}
+        return {
+            "success": True,
+            "data": {"invitation_id": invitation_id, "email": email, "invitation_url": url},
+        }
     except HTTPException:
         raise
     except Exception:
