@@ -3,6 +3,4 @@
 __pycache__
 *.py[cod]
 *.csv
-migrations
 .DS_Store
-
