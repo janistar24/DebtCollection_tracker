@@ -14,6 +14,7 @@ import { generateOwnerCode, isDuplicateCode } from '../utils/ownerCode'
 import { createCompletePayment } from '../api/payments'
 import { createFollowUpLog } from '../api/follow_up_logs'
 import PaymentForm from '../components/PaymentForm'
+import BuddhistDateInput from '../components/BuddhistDateInput'
 
 // Extract short keyword tags from a freeform note string
 function extractTags(tp: Taxpayer): { label: string; year: number; note: string }[] {
@@ -540,7 +541,7 @@ export default function TaxpayerDetailPage() {
                 </div>
                 <div>
                   <label style={LBL}>วันที่และเวลา</label>
-                  <input className="input-field" type="datetime-local" value={fuDate} onChange={e => setFuDate(e.target.value)} />
+                  <BuddhistDateInput value={fuDate} onChange={setFuDate} includeTime required />
                 </div>
               </div>
               {fuType === 'phone' && (
@@ -560,7 +561,7 @@ export default function TaxpayerDetailPage() {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14, padding: '14px', background: 'rgba(240,236,251,0.5)', borderRadius: 12 }}>
                   <div>
                     <label style={LBL}>📅 วันที่แจ้งว่าจะชำระ</label>
-                    <input className="input-field" type="date" value={fuPromiseDate} onChange={e => setFuPromiseDate(e.target.value)} />
+                    <BuddhistDateInput value={fuPromiseDate} onChange={setFuPromiseDate} />
                   </div>
                   <div>
                     <label style={LBL}>💰 ยอดที่แจ้งว่าจะชำระ</label>
@@ -570,7 +571,7 @@ export default function TaxpayerDetailPage() {
               )}
               <div style={{ marginBottom: 20 }}>
                 <label style={LBL}>วันที่ควรติดตามครั้งถัดไป</label>
-                <input className="input-field" type="date" value={fuNextDate} onChange={e => setFuNextDate(e.target.value)} />
+                <BuddhistDateInput value={fuNextDate} onChange={setFuNextDate} />
               </div>
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
                 <button className="btn-secondary" onClick={() => setShowFollowModal(false)}>ยกเลิก</button>
@@ -605,7 +606,7 @@ export default function TaxpayerDetailPage() {
                 </div>
                 <div>
                   <label style={LBL}>วันที่และเวลาที่ชำระ *</label>
-                  <input className="input-field" type="datetime-local" value={payDate} onChange={e => setPayDate(e.target.value)} />
+                  <BuddhistDateInput value={payDate} onChange={setPayDate} includeTime required />
                 </div>
               </div>
               <div style={{ marginBottom: 16 }}>

@@ -92,13 +92,14 @@ export function installAuthenticatedFetch() {
   const originalFetch = window.fetch.bind(window)
   window.fetch = async (input: RequestInfo | URL, init: RequestInit = {}) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+    const publicRequest = url.endsWith('/api/login') || url.includes('/api/user-invitations/')
     const token = localStorage.getItem('tax_access_token')
     const headers = new Headers(init.headers ?? (input instanceof Request ? input.headers : undefined))
-    if (token && url.includes('/api/') && !url.endsWith('/api/login')) {
+    if (token && url.includes('/api/') && !publicRequest) {
       headers.set('Authorization', `Bearer ${token}`)
     }
     const response = await originalFetch(input, { ...init, headers })
-    if (response.status === 401 && !url.endsWith('/api/login')) {
+    if (response.status === 401 && !publicRequest) {
       clearAuthSession()
       window.location.hash = '#/login'
     }

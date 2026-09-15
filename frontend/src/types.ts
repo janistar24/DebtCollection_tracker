@@ -8,6 +8,7 @@ export interface User {
   group?: string
   active: boolean
   username?: string
+  email?: string
 }
 
 export type TaxType = 'land' | 'sign' | 'both'

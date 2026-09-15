@@ -33,6 +33,7 @@ interface AppState {
   addFollowUp: (followUp: FollowUp) => void
   addUser: (user: User) => void
   updateUser: (user: User) => void
+  removeUser: (userId: string) => void
   refreshData: () => Promise<void>
 }
 
@@ -187,6 +188,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     )
   }
 
+  const removeUser = (userId: string) => {
+    setUsers((current) => current.filter((item) => item.id !== userId))
+  }
+
   return (
     <AppContext.Provider
       value={{
@@ -206,6 +211,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         addFollowUp,
         addUser,
         updateUser,
+        removeUser,
         refreshData,
       }}
     >

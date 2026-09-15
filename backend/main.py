@@ -1,10 +1,13 @@
 import json
+import hashlib
 import logging
 import os
+import re
+import secrets
 import subprocess
 import uuid
 from collections import defaultdict, deque
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from threading import Lock
 from time import monotonic
 from typing import Literal
@@ -27,6 +30,7 @@ from taxpayer_year_records import Taxpayer_year_records
 from payment_allocations import Payment_allocations
 from slip_ocr import read_slip
 from auth_security import authenticated_user, create_access_token
+from mailer import send_user_invitation
 
 is_production = os.getenv("ENVIRONMENT", "development").lower() == "production"
 
@@ -70,11 +74,42 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
-PUBLIC_PATHS = {"/", "/api/login", "/docs", "/openapi.json", "/redoc"}
+PUBLIC_PATHS = {
+    "/", "/health", "/api/login", "/api/user-invitations/validate",
+    "/api/user-invitations/accept", "/docs", "/openapi.json", "/redoc",
+}
 LOGIN_WINDOW_SECONDS = 15 * 60
 LOGIN_MAX_FAILURES = 10
 login_failures: dict[str, deque[float]] = defaultdict(deque)
 login_failures_lock = Lock()
+
+
+@app.on_event("startup")
+def ensure_user_invitation_schema() -> None:
+    migration_path = os.path.join(os.path.dirname(__file__), "migrations", "005_add_user_email_invitations.sql")
+    with open(migration_path, "r", encoding="utf-8") as migration_file:
+        db.execute(migration_file.read())
+
+
+def _clean_email(value: str | None, required: bool = False) -> str | None:
+    email = (value or "").strip().lower()
+    if not email and not required:
+        return None
+    if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email):
+        raise HTTPException(status_code=400, detail="รูปแบบอีเมลไม่ถูกต้อง")
+    return email
+
+
+def _invitation_url(token: str) -> str:
+    frontend_url = os.getenv("FRONTEND_URL", "").strip().rstrip("/")
+    if not frontend_url:
+        raise RuntimeError("ยังไม่ได้กำหนด FRONTEND_URL")
+    return f"{frontend_url}/#/accept-invite?token={token}"
+
+
+def _invite_token() -> tuple[str, str]:
+    token = secrets.token_urlsafe(32)
+    return token, hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 def _login_key(request: Request, username: str) -> str:
@@ -135,6 +170,14 @@ def _require_permanent_delete_permission(request: Request) -> None:
         raise HTTPException(
             status_code=403,
             detail="การลบข้อมูลผู้เสียภาษีอย่างถาวรดำเนินการได้เฉพาะผู้บริหารหรือผู้ดูแลระบบเท่านั้น",
+        )
+
+
+def _require_admin_account_management(request: Request) -> None:
+    if _actor(request).get("role") != "ADMIN":
+        raise HTTPException(
+            status_code=403,
+            detail="การบริหารบัญชีผู้ใช้งานดำเนินการได้เฉพาะผู้ดูแลระบบเท่านั้น",
         )
 
 
@@ -329,6 +372,7 @@ class AdminUserCreate(BaseModel):
     first_name: str
     last_name: str
     username: str
+    email: str | None = None
     password: str
     role: str
     group_code: str | None = None
@@ -339,10 +383,161 @@ class AdminUserUpdate(BaseModel):
     first_name: str
     last_name: str
     username: str
+    email: str | None = None
     password: str | None = None
     role: str
     group_code: str | None = None
     is_active: bool = True
+
+class AdminPasswordReset(BaseModel):
+    password: str
+
+
+class AdminUserInvitation(BaseModel):
+    employee_code: str
+    first_name: str
+    last_name: str
+    email: str
+    role: str
+    group_code: str | None = None
+
+
+class InvitationTokenRequest(BaseModel):
+    token: str
+
+
+class AcceptUserInvitation(InvitationTokenRequest):
+    username: str
+    password: str
+
+
+def _invitation_record(cursor, token_hash: str, lock: bool = False) -> dict:
+    cursor.execute(
+        """SELECT invitation_id,email,employee_code,first_name,last_name,role,group_code,
+                  expires_at,accepted_at,revoked_at
+           FROM public.user_invitations WHERE token_hash=%s""" + (" FOR UPDATE" if lock else ""),
+        (token_hash,),
+    )
+    row = cursor.fetchone()
+    if row is None:
+        raise HTTPException(status_code=400, detail="ลิงก์คำเชิญไม่ถูกต้องหรือหมดอายุ")
+    record = dict(zip((column.name for column in cursor.description), row))
+    if record["accepted_at"] or record["revoked_at"] or record["expires_at"] <= datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="ลิงก์คำเชิญถูกใช้งานแล้วหรือหมดอายุ")
+    return record
+
+
+@app.post("/api/users/invitations")
+def create_user_invitation(payload: AdminUserInvitation, http_request: Request):
+    _require_admin_account_management(http_request)
+    email = _clean_email(payload.email, required=True)
+    role = payload.role.upper()
+    if role not in {"OFFICER", "DIRECTOR", "ADMIN"}:
+        raise HTTPException(status_code=400, detail="สิทธิ์ผู้ใช้งานไม่ถูกต้อง")
+    if role == "OFFICER" and not payload.group_code:
+        raise HTTPException(status_code=400, detail="กรุณาเลือกกลุ่มรับผิดชอบ")
+    if not payload.employee_code.strip() or not payload.first_name.strip() or not payload.last_name.strip():
+        raise HTTPException(status_code=400, detail="กรุณากรอกข้อมูลที่จำเป็นให้ครบถ้วน")
+    expires_hours = max(1, min(168, int(os.getenv("INVITATION_EXPIRES_HOURS", "48"))))
+    token, token_hash = _invite_token()
+    url = _invitation_url(token)
+    try:
+        with db.transaction() as cursor:
+            cursor.execute(
+                """SELECT user_id FROM public.users WHERE employee_code=%s OR LOWER(email)=%s""",
+                (payload.employee_code.strip(), email),
+            )
+            if cursor.fetchone():
+                raise HTTPException(status_code=409, detail="รหัสพนักงานหรืออีเมลนี้มีบัญชีอยู่แล้ว")
+            cursor.execute(
+                """SELECT invitation_id FROM public.user_invitations
+                   WHERE (employee_code=%s OR LOWER(email)=%s)
+                     AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at>CURRENT_TIMESTAMP""",
+                (payload.employee_code.strip(), email),
+            )
+            if cursor.fetchone():
+                raise HTTPException(status_code=409, detail="มีคำเชิญที่ยังไม่หมดอายุสำหรับรหัสพนักงานหรืออีเมลนี้")
+            if role == "OFFICER":
+                cursor.execute(
+                    """SELECT user_id FROM public.responsibility_assignments
+                       WHERE group_code=%s AND is_active=TRUE""", (payload.group_code,),
+                )
+                if cursor.fetchone():
+                    raise HTTPException(status_code=409, detail="กลุ่มนี้มีเจ้าหน้าที่ผู้รับผิดชอบอยู่แล้ว")
+            cursor.execute(
+                """INSERT INTO public.user_invitations
+                   (email,employee_code,first_name,last_name,role,group_code,token_hash,expires_at,created_by)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING invitation_id""",
+                (email, payload.employee_code.strip(), payload.first_name.strip(),
+                 payload.last_name.strip(), role, payload.group_code if role == "OFFICER" else None,
+                 token_hash, datetime.now(timezone.utc) + timedelta(hours=expires_hours), _actor_id(http_request)),
+            )
+            invitation_id = cursor.fetchone()[0]
+        try:
+            send_user_invitation(email, f"{payload.first_name.strip()} {payload.last_name.strip()}", url, expires_hours)
+        except Exception:
+            logger.exception("Could not send user invitation %s", invitation_id)
+            with db.transaction() as cursor:
+                cursor.execute(
+                    "UPDATE public.user_invitations SET revoked_at=CURRENT_TIMESTAMP WHERE invitation_id=%s",
+                    (invitation_id,),
+                )
+            raise HTTPException(status_code=503, detail="บันทึกคำเชิญแล้วแต่ส่งอีเมลไม่สำเร็จ กรุณาตรวจสอบการตั้งค่า SMTP")
+        db.execute(
+            "UPDATE public.user_invitations SET sent_at=CURRENT_TIMESTAMP WHERE invitation_id=%s",
+            (invitation_id,),
+        )
+        return {"success": True, "data": {"invitation_id": invitation_id, "email": email}}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("User invitation creation failed")
+        raise HTTPException(status_code=500, detail="ไม่สามารถสร้างคำเชิญได้")
+
+
+@app.post("/api/user-invitations/validate")
+def validate_user_invitation(payload: InvitationTokenRequest):
+    token_hash = hashlib.sha256(payload.token.encode("utf-8")).hexdigest()
+    with db.transaction() as cursor:
+        record = _invitation_record(cursor, token_hash)
+    return {"success": True, "data": {
+        "email": record["email"], "name": f'{record["first_name"]} {record["last_name"]}',
+        "role": record["role"], "expires_at": record["expires_at"].isoformat(),
+    }}
+
+
+@app.post("/api/user-invitations/accept")
+def accept_user_invitation(payload: AcceptUserInvitation):
+    username = payload.username.strip()
+    if not re.fullmatch(r"[A-Za-z0-9._-]{3,64}", username):
+        raise HTTPException(status_code=400, detail="ชื่อผู้ใช้งานต้องเป็นอักษรอังกฤษ ตัวเลข จุด ขีดกลาง หรือขีดล่าง 3–64 ตัว")
+    if len(payload.password) < 12:
+        raise HTTPException(status_code=400, detail="รหัสผ่านต้องมีอย่างน้อย 12 ตัวอักษร")
+    token_hash = hashlib.sha256(payload.token.encode("utf-8")).hexdigest()
+    with db.transaction() as cursor:
+        invitation = _invitation_record(cursor, token_hash, lock=True)
+        cursor.execute(
+            """SELECT user_id FROM public.users
+               WHERE username=%s OR employee_code=%s OR LOWER(email)=%s""",
+            (username, invitation["employee_code"], invitation["email"]),
+        )
+        if cursor.fetchone():
+            raise HTTPException(status_code=409, detail="ชื่อผู้ใช้งาน รหัสพนักงาน หรืออีเมลนี้ถูกใช้งานแล้ว")
+        cursor.execute(
+            """INSERT INTO public.users
+               (employee_code,first_name,last_name,role,username,email,password_hash,is_active)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,TRUE) RETURNING user_id""",
+            (invitation["employee_code"], invitation["first_name"], invitation["last_name"],
+             invitation["role"], username, invitation["email"], password_hash.hash(payload.password)),
+        )
+        user_id = cursor.fetchone()[0]
+        _save_user_assignment(cursor, user_id, invitation["role"], invitation["group_code"])
+        cursor.execute(
+            """UPDATE public.user_invitations
+               SET accepted_at=CURRENT_TIMESTAMP,created_user_id=%s WHERE invitation_id=%s""",
+            (user_id, invitation["invitation_id"]),
+        )
+    return {"success": True}
 
 def _save_user_assignment(cursor, user_id: int, role: str, group_code: str | None):
     cursor.execute(
@@ -378,20 +573,22 @@ def create_admin_user(request: AdminUserCreate):
         raise HTTPException(status_code=400, detail="กรุณาเลือกกลุ่มรับผิดชอบ")
     if len(request.password) < 12:
         raise HTTPException(status_code=400, detail="รหัสผ่านต้องมีอย่างน้อย 12 ตัวอักษร")
+    email = _clean_email(request.email)
     try:
         with db.transaction() as cursor:
             cursor.execute(
-                "SELECT user_id FROM public.users WHERE employee_code=%s OR username=%s",
-                (request.employee_code.strip(), request.username.strip()),
+                """SELECT user_id FROM public.users
+                   WHERE employee_code=%s OR username=%s OR (%s IS NOT NULL AND LOWER(email)=%s)""",
+                (request.employee_code.strip(), request.username.strip(), email, email),
             )
             if cursor.fetchone():
                 raise HTTPException(status_code=409, detail="รหัสพนักงานหรือ Username ถูกใช้งานแล้ว")
             cursor.execute(
                 """INSERT INTO public.users
-                   (employee_code,first_name,last_name,role,username,password_hash,is_active)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING user_id""",
+                   (employee_code,first_name,last_name,role,username,email,password_hash,is_active)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING user_id""",
                 (request.employee_code.strip(), request.first_name.strip(), request.last_name.strip(),
-                 role, request.username.strip(), password_hash.hash(request.password), request.is_active),
+                 role, request.username.strip(), email, password_hash.hash(request.password), request.is_active),
             )
             user_id = cursor.fetchone()[0]
             _save_user_assignment(cursor, user_id, role, request.group_code)
@@ -410,6 +607,7 @@ def update_admin_user(user_id: int, request: AdminUserUpdate):
         raise HTTPException(status_code=400, detail="กรุณาเลือกกลุ่มรับผิดชอบ")
     if request.password and len(request.password) < 12:
         raise HTTPException(status_code=400, detail="รหัสผ่านต้องมีอย่างน้อย 12 ตัวอักษร")
+    email = _clean_email(request.email)
     try:
         with db.transaction() as cursor:
             cursor.execute("SELECT user_id FROM public.users WHERE user_id=%s", (user_id,))
@@ -417,27 +615,28 @@ def update_admin_user(user_id: int, request: AdminUserUpdate):
                 raise HTTPException(status_code=404, detail="ไม่พบผู้ใช้งาน")
             cursor.execute(
                 """SELECT user_id FROM public.users
-                   WHERE (employee_code=%s OR username=%s) AND user_id<>%s""",
-                (request.employee_code.strip(), request.username.strip(), user_id),
+                   WHERE (employee_code=%s OR username=%s OR (%s IS NOT NULL AND LOWER(email)=%s))
+                     AND user_id<>%s""",
+                (request.employee_code.strip(), request.username.strip(), email, email, user_id),
             )
             if cursor.fetchone():
                 raise HTTPException(status_code=409, detail="รหัสพนักงานหรือ Username ถูกใช้งานแล้ว")
             if request.password:
                 cursor.execute(
                     """UPDATE public.users SET employee_code=%s,first_name=%s,last_name=%s,
-                       role=%s,username=%s,password_hash=%s,is_active=%s,updated_at=CURRENT_TIMESTAMP
+                       role=%s,username=%s,email=%s,password_hash=%s,is_active=%s,updated_at=CURRENT_TIMESTAMP
                        WHERE user_id=%s""",
                     (request.employee_code.strip(), request.first_name.strip(), request.last_name.strip(),
-                     role, request.username.strip(), password_hash.hash(request.password),
+                     role, request.username.strip(), email, password_hash.hash(request.password),
                      request.is_active, user_id),
                 )
             else:
                 cursor.execute(
                     """UPDATE public.users SET employee_code=%s,first_name=%s,last_name=%s,
-                       role=%s,username=%s,is_active=%s,updated_at=CURRENT_TIMESTAMP
+                       role=%s,username=%s,email=%s,is_active=%s,updated_at=CURRENT_TIMESTAMP
                        WHERE user_id=%s""",
                     (request.employee_code.strip(), request.first_name.strip(), request.last_name.strip(),
-                     role, request.username.strip(), request.is_active, user_id),
+                     role, request.username.strip(), email, request.is_active, user_id),
                 )
             _save_user_assignment(cursor, user_id, role, request.group_code)
         return {"success": True}
@@ -447,7 +646,10 @@ def update_admin_user(user_id: int, request: AdminUserUpdate):
         raise HTTPException(status_code=500, detail={"message": "แก้ไขผู้ใช้งานไม่สำเร็จ", "error": str(error)})
 
 @app.put("/api/users/{user_id}/active")
-def set_admin_user_active(user_id: int, is_active: bool):
+def set_admin_user_active(user_id: int, is_active: bool, http_request: Request):
+    _require_admin_account_management(http_request)
+    if user_id == _actor_id(http_request) and not is_active:
+        raise HTTPException(status_code=400, detail="ไม่สามารถปิดการใช้งานบัญชีที่กำลังเข้าสู่ระบบอยู่ได้")
     try:
         with db.transaction() as cursor:
             cursor.execute(
@@ -468,6 +670,49 @@ def set_admin_user_active(user_id: int, is_active: bool):
                 "error": str(error)
             }
         )
+
+@app.put("/api/users/{user_id}/password")
+def reset_admin_user_password(user_id: int, request: AdminPasswordReset, http_request: Request):
+    _require_admin_account_management(http_request)
+    if len(request.password) < 12:
+        raise HTTPException(status_code=400, detail="รหัสผ่านต้องมีอย่างน้อย 12 ตัวอักษร")
+    try:
+        with db.transaction() as cursor:
+            cursor.execute(
+                """UPDATE public.users
+                   SET password_hash=%s,updated_at=CURRENT_TIMESTAMP
+                   WHERE user_id=%s RETURNING user_id""",
+                (password_hash.hash(request.password), user_id),
+            )
+            if cursor.fetchone() is None:
+                raise HTTPException(status_code=404, detail="ไม่พบผู้ใช้งาน")
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(status_code=500, detail={"message": "รีเซ็ตรหัสผ่านไม่สำเร็จ", "error": str(error)})
+
+@app.delete("/api/users/{user_id}")
+def delete_admin_user(user_id: int, http_request: Request):
+    _require_admin_account_management(http_request)
+    if user_id == _actor_id(http_request):
+        raise HTTPException(status_code=400, detail="ไม่สามารถลบบัญชีที่กำลังเข้าสู่ระบบอยู่ได้")
+    try:
+        with db.transaction() as cursor:
+            cursor.execute("SELECT username FROM public.users WHERE user_id=%s FOR UPDATE", (user_id,))
+            record = cursor.fetchone()
+            if record is None:
+                raise HTTPException(status_code=404, detail="ไม่พบผู้ใช้งาน")
+            # เก็บประวัติการติดต่อ การชำระ และการประเมินภาษีไว้ โดย Foreign Key
+            # ของข้อมูลประวัติตั้งค่า ON DELETE SET NULL ลบเฉพาะการมอบหมายกลุ่ม
+            # ของบัญชี ก่อนลบบัญชีผู้ใช้งาน
+            cursor.execute("DELETE FROM public.responsibility_assignments WHERE user_id=%s", (user_id,))
+            cursor.execute("DELETE FROM public.users WHERE user_id=%s", (user_id,))
+        return {"success": True, "data": {"username": record[0]}}
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(status_code=500, detail={"message": "ลบบัญชีผู้ใช้งานไม่สำเร็จ", "error": str(error)})
 
 @app.get("/api/taxpayers")
 def get_taxpayers(request: Request):
@@ -763,7 +1008,10 @@ def create_complete_payment(request: CompletePaymentCreate, http_request: Reques
                           COALESCE((SELECT SUM(pa.allocated_amount)
                                     FROM public.payment_allocations pa
                                     WHERE pa.assessment_id=ta.assessment_id),0) AS paid_amount
+                          ,tyr.taxpayer_id
                    FROM public.tax_assessments ta
+                   JOIN public.taxpayer_year_records tyr
+                     ON tyr.year_record_id=ta.year_record_id
                    WHERE ta.assessment_id = ANY(%s)
                    FOR UPDATE OF ta""",
                 (assessment_ids,),
@@ -772,8 +1020,8 @@ def create_complete_payment(request: CompletePaymentCreate, http_request: Reques
             missing = [item_id for item_id in assessment_ids if item_id not in assessment_rows]
             if missing:
                 raise HTTPException(status_code=404, detail=f"ไม่พบข้อมูลการประเมินภาษีรหัส {missing[0]}")
-            if len({row[1] for row in assessment_rows.values()}) != 1:
-                raise HTTPException(status_code=400, detail="รายการภาษีที่จัดสรรต้องเป็นของผู้เสียภาษีรายเดียวกันและปีเดียวกัน")
+            if len({row[4] for row in assessment_rows.values()}) != 1:
+                raise HTTPException(status_code=400, detail="รายการภาษีที่จัดสรรต้องเป็นของผู้เสียภาษีรายเดียวกัน")
             for item in request.allocations:
                 row = assessment_rows[item.assessment_id]
                 remaining = float(row[2]) - float(row[3])

@@ -1,20 +1,13 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useApp } from '../context/AppContext'
 import { createCompletePayment } from '../api/payments'
-import { formatCurrency, getLandRemaining, getSignRemaining, getTaxpayerName } from '../data/taxData'
-import type { Taxpayer } from '../types'
+import { formatCurrency, getInstallmentCount, getOutstandingYears, getTaxpayerName, getTotalAssessed } from '../data/taxData'
+import type { PayMethod, Taxpayer } from '../types'
+import BuddhistDateInput from './BuddhistDateInput'
 
 type Scope = 'land' | 'sign' | 'both'
-
-interface Props {
-  taxpayer: Taxpayer
-  year: number
-  initialAmount?: number
-  initialMethod?: 'transfer' | 'cash'
-  initialScope?: Scope
-  onCancel: () => void
-  onSuccess?: () => void
-}
+type AllocationRow = { assessmentId: number; year: number; taxType: 'land' | 'sign'; label: string; remaining: number }
+type Props = { taxpayer: Taxpayer; year: number; initialAmount?: number; initialMethod?: PayMethod; initialScope?: Scope; onCancel: () => void; onSuccess?: () => void }
 
 const localDateTimeNow = () => {
   const now = new Date()
@@ -23,82 +16,41 @@ const localDateTimeNow = () => {
 
 export default function PaymentForm({ taxpayer, year, initialAmount, initialMethod = 'transfer', initialScope, onCancel, onSuccess }: Props) {
   const { currentUser, addPayment, refreshData } = useApp()
-  const assessment = taxpayer.assessments.find(item => item.year === year)
-  const landRemaining = getLandRemaining(taxpayer, year)
-  const signRemaining = getSignRemaining(taxpayer, year)
-  const totalRemaining = landRemaining + signRemaining
-  const defaultScope: Scope = initialScope ?? (landRemaining > 0 && signRemaining > 0 ? 'both' : landRemaining > 0 ? 'land' : 'sign')
-  const startingAmount = Math.min(initialAmount ?? totalRemaining, totalRemaining)
-
-  const allocate = (amount: number, scope: Scope) => {
-    if (scope === 'land') return { land: Math.min(amount, landRemaining), sign: 0 }
-    if (scope === 'sign') return { land: 0, sign: Math.min(amount, signRemaining) }
-    const land = Math.min(amount, landRemaining)
-    return { land, sign: Math.min(amount - land, signRemaining) }
-  }
-
-  const initialAllocation = allocate(startingAmount, defaultScope)
-  const [amount, setAmount] = useState(startingAmount > 0 ? String(startingAmount) : '')
+  const outstandingYears = useMemo(() => getOutstandingYears(taxpayer, year), [taxpayer, year])
+  const rows = useMemo<AllocationRow[]>(() => outstandingYears.flatMap(({ assessment, landRemaining, signRemaining }) => [
+    ...(landRemaining > 0 && assessment.landAssessmentId ? [{ assessmentId: Number(assessment.landAssessmentId), year: assessment.year, taxType: 'land' as const, label: 'ภาษีที่ดินและสิ่งปลูกสร้าง', remaining: landRemaining }] : []),
+    ...(signRemaining > 0 && assessment.signAssessmentId ? [{ assessmentId: Number(assessment.signAssessmentId), year: assessment.year, taxType: 'sign' as const, label: 'ภาษีป้าย', remaining: signRemaining }] : []),
+  ]), [outstandingYears])
+  const totalOutstanding = rows.reduce((sum, row) => sum + row.remaining, 0)
+  const installmentCount = getInstallmentCount(taxpayer)
+  const nextInstallment = installmentCount + 1
+  const initialPayment = Math.min(initialAmount ?? totalOutstanding, totalOutstanding)
+  const [amount, setAmount] = useState(initialPayment > 0 ? String(initialPayment) : '')
   const [dateTime, setDateTime] = useState(localDateTimeNow())
+  const [allocations, setAllocations] = useState<Record<number, string>>({})
+  const hasLand = rows.some(row => row.taxType === 'land')
+  const hasSign = rows.some(row => row.taxType === 'sign')
+  const defaultScope: Scope = initialScope && (initialScope !== 'land' || hasLand) && (initialScope !== 'sign' || hasSign) && (initialScope !== 'both' || (hasLand && hasSign)) ? initialScope : hasLand && hasSign ? 'both' : hasLand ? 'land' : 'sign'
   const [scope, setScope] = useState<Scope>(defaultScope)
-  const [landAllocation, setLandAllocation] = useState(String(initialAllocation.land || ''))
-  const [signAllocation, setSignAllocation] = useState(String(initialAllocation.sign || ''))
-  const [method, setMethod] = useState<'transfer' | 'cash'>(initialMethod)
+  const [method, setMethod] = useState<PayMethod>(initialMethod)
   const [reference, setReference] = useState('')
   const [receipt, setReceipt] = useState('')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
-
   const paymentAmount = Number(amount) || 0
-  const allocatedLand = Number(landAllocation) || 0
-  const allocatedSign = Number(signAllocation) || 0
-  const allocatedTotal = allocatedLand + allocatedSign
+  const allocatedTotal = rows.filter(row => scope === 'both' || row.taxType === scope).reduce((sum, row) => sum + (Number(allocations[row.assessmentId]) || 0), 0)
 
-  const changeAmount = (raw: string) => {
-    setAmount(raw)
-    const next = allocate(Number(raw) || 0, scope)
-    setLandAllocation(String(next.land || ''))
-    setSignAllocation(String(next.sign || ''))
-  }
-
-  const changeScope = (nextScope: Scope) => {
-    setScope(nextScope)
-    const next = allocate(paymentAmount, nextScope)
-    setLandAllocation(String(next.land || ''))
-    setSignAllocation(String(next.sign || ''))
-  }
-
-  const changeLandAllocation = (raw: string) => {
-    const land = Math.min(Number(raw) || 0, landRemaining, paymentAmount)
-    setLandAllocation(raw === '' ? '' : String(land))
-    if (scope === 'both') {
-      const sign = Math.min(Math.max(paymentAmount - land, 0), signRemaining)
-      setSignAllocation(String(sign || ''))
-    }
-  }
-
-  const changeSignAllocation = (raw: string) => {
-    const sign = Math.min(Number(raw) || 0, signRemaining, paymentAmount)
-    setSignAllocation(raw === '' ? '' : String(sign))
-    if (scope === 'both') {
-      const land = Math.min(Math.max(paymentAmount - sign, 0), landRemaining)
-      setLandAllocation(String(land || ''))
-    }
+  const setAllocation = (row: AllocationRow, raw: string) => {
+    if (!raw) return setAllocations(current => ({ ...current, [row.assessmentId]: '' }))
+    const value = Math.max(0, Math.min(Number(raw) || 0, row.remaining, paymentAmount))
+    setAllocations(current => ({ ...current, [row.assessmentId]: String(value) }))
   }
 
   const save = async () => {
     if (paymentAmount <= 0) return alert('กรุณากรอกยอดเงินที่รับชำระ')
-    if (paymentAmount > totalRemaining) return alert('ยอดรับชำระมากกว่ายอดภาษีคงเหลือ')
-    if (Math.abs(allocatedTotal - paymentAmount) > 0.009) return alert('ผลรวมยอดตัดภาษีต้องเท่ากับยอดเงินที่ได้รับ')
-    if (allocatedLand > landRemaining || allocatedSign > signRemaining) return alert('ยอดตัดภาษีมากกว่ายอดคงเหลือ')
-    if (allocatedLand > 0 && !assessment?.landAssessmentId) return alert('ไม่พบรหัสการประเมินภาษีที่ดิน')
-    if (allocatedSign > 0 && !assessment?.signAssessmentId) return alert('ไม่พบรหัสการประเมินภาษีป้าย')
-
-    const allocations = [
-      ...(allocatedLand > 0 ? [{ assessment_id: Number(assessment!.landAssessmentId), allocated_amount: allocatedLand }] : []),
-      ...(allocatedSign > 0 ? [{ assessment_id: Number(assessment!.signAssessmentId), allocated_amount: allocatedSign }] : []),
-    ]
-
+    if (paymentAmount > totalOutstanding) return alert('ยอดรับชำระมากกว่ายอดหนี้คงเหลือ')
+    if (Math.abs(allocatedTotal - paymentAmount) > 0.009) return alert('ผลรวมยอดที่จัดสรรต้องเท่ากับยอดเงินที่ได้รับ')
+    const selected = rows.filter(row => scope === 'both' || row.taxType === scope).map(row => ({ ...row, allocatedAmount: Number(allocations[row.assessmentId]) || 0 })).filter(row => row.allocatedAmount > 0)
     try {
       setSaving(true)
       const paymentId = await createCompletePayment({
@@ -109,25 +61,22 @@ export default function PaymentForm({ taxpayer, year, initialAmount, initialMeth
         reference_no: method === 'transfer' ? reference || null : null,
         receipt_no: method === 'cash' ? receipt || null : null,
         recorded_by: currentUser?.id ? Number(currentUser.id) : null,
-        allocations,
+        allocations: selected.map(row => ({ assessment_id: row.assessmentId, allocated_amount: row.allocatedAmount })),
       })
-
-      // API ตอบหลัง transaction commit แล้ว จึงอัปเดตเฉพาะผู้เสียภาษีคนนี้
-      addPayment({
-        id: paymentId,
-        taxpayerId: taxpayer.id,
-        amount: paymentAmount,
-        date: dateTime.slice(0, 10),
-        method,
+      const byYear = new Map<number, { land: number; sign: number }>()
+      selected.forEach(row => {
+        const current = byYear.get(row.year) ?? { land: 0, sign: 0 }
+        current[row.taxType] += row.allocatedAmount
+        byYear.set(row.year, current)
+      })
+      byYear.forEach((allocated, taxYear) => addPayment({
+        id: paymentId, taxpayerId: taxpayer.id, amount: allocated.land + allocated.sign,
+        date: dateTime.slice(0, 10), method,
         refNo: method === 'transfer' ? reference || undefined : undefined,
         receiptNo: method === 'cash' ? receipt || undefined : undefined,
-        allocatedLand,
-        allocatedSign,
-        recordedBy: currentUser?.id ?? '',
-        taxYear: year,
-      })
-      // การบันทึกเสร็จสมบูรณ์ตั้งแต่ API ตอบกลับแล้ว ไม่ให้การโหลดข้อมูลชุดใหญ่
-      // ที่ช้าหรือล้มเหลวทำให้ผู้ใช้เข้าใจผิดว่ารายการชำระไม่ได้ถูกบันทึก
+        allocatedLand: allocated.land, allocatedSign: allocated.sign,
+        recordedBy: currentUser?.id ?? '', taxYear,
+      }))
       void refreshData().catch(error => console.error('รีเฟรชข้อมูลหลังบันทึกการชำระไม่สำเร็จ:', error))
       setSaved(true)
       setTimeout(() => onSuccess?.(), 900)
@@ -138,31 +87,60 @@ export default function PaymentForm({ taxpayer, year, initialAmount, initialMeth
     }
   }
 
-  if (saved) return <div style={{ textAlign: 'center', padding: '28px 0' }}><div style={{ fontSize: 42 }}>✅</div><div style={{ marginTop: 8, fontWeight: 700, color: '#1a8f5a' }}>บันทึกการชำระเรียบร้อยแล้ว</div></div>
+  if (saved) return <div style={{ textAlign: 'center', padding: '28px 0' }}><div style={{ fontSize: 42 }}>✅</div><div style={{ marginTop: 8, fontSize: 16, fontWeight: 700, color: '#1a8f5a' }}>บันทึกการชำระงวดที่ {nextInstallment} เรียบร้อยแล้ว</div></div>
 
   return <>
-    <div style={{ padding: '12px 14px', borderRadius: 12, background: 'rgba(240,236,251,.55)', marginBottom: 16 }}>
-      <div style={{ fontWeight: 700, color: '#2d2545' }}>{getTaxpayerName(taxpayer)}</div>
-      <div style={{ fontSize: 11, color: '#a89cc8' }}>{taxpayer.ownerCode || 'นิติบุคคล'} · ปีภาษี {year}</div>
-      <div style={{ display: 'flex', gap: 18, marginTop: 8, fontSize: 12 }}><span>ภาษีที่ดินและสิ่งปลูกสร้าง ค้าง <b>฿{formatCurrency(landRemaining)}</b></span><span>ป้ายค้าง <b>฿{formatCurrency(signRemaining)}</b></span></div>
+    <div style={PROFILE}>
+      <div style={{ fontSize: 15, fontWeight: 700, color: '#2d2545' }}>{getTaxpayerName(taxpayer)}</div>
+      <div style={{ fontSize: 12, color: '#a89cc8', marginTop: 2 }}>{taxpayer.ownerCode || 'นิติบุคคล'} · ปีภาษีปัจจุบัน {year}</div>
+      <div style={SUMMARY_GRID}><Summary label="ยอดประเมินภาษีปีปัจจุบัน" value={`฿${formatCurrency(getTotalAssessed(taxpayer, year))}`} /><Summary label="ยอดหนี้คงเหลือ" value={`฿${formatCurrency(totalOutstanding)}`} danger /></div>
+      <div style={INSTALLMENT}><span>เคยชำระมาแล้วจำนวน <b>{installmentCount} งวด</b></span><span>รายการนี้จะบันทึกเป็น <b>งวดที่ {nextInstallment}</b></span></div>
     </div>
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
-      <div><label style={LBL}>ยอดเงินที่ได้รับ (บาท) *</label><input className="input-field" type="number" min="0" step="0.01" value={amount} onChange={e => changeAmount(e.target.value)} /></div>
-      <div><label style={LBL}>วันที่และเวลาที่ชำระ *</label><input className="input-field" type="datetime-local" value={dateTime} onChange={e => setDateTime(e.target.value)} /></div>
+    <div className="payment-main-fields" style={TWO_COLUMNS}>
+      <div><label style={LABEL}>ยอดเงินที่ได้รับ (บาท) *</label><input className="input-field" type="number" min="0" step="0.01" value={amount} onChange={event => setAmount(event.target.value)} /></div>
+      <div><label style={LABEL}>วันที่และเวลาที่ชำระ *</label><BuddhistDateInput value={dateTime} onChange={setDateTime} includeTime required /></div>
     </div>
-    <div style={{ marginBottom: 14 }}><label style={LBL}>ประเภทภาษีที่ต้องการตัดยอด *</label><div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
-      {([['land','🏠 ภาษีที่ดินและสิ่งปลูกสร้าง'],['sign','🪧 ภาษีป้าย'],['both','🏠 + 🪧 ทั้งสองประเภท']] as [Scope,string][]).map(([value,label]) => <button key={value} type="button" disabled={(value === 'land' && landRemaining <= 0) || (value === 'sign' && signRemaining <= 0) || (value === 'both' && (landRemaining <= 0 || signRemaining <= 0))} onClick={() => changeScope(value)} style={choiceStyle(scope === value)}>{label}</button>)}
-    </div></div>
-    <div style={{ display: 'grid', gridTemplateColumns: scope === 'both' ? '1fr 1fr' : '1fr', gap: 12, padding: 13, borderRadius: 12, background: 'rgba(240,236,251,.45)', marginBottom: 14 }}>
-      {scope !== 'sign' && <div><label style={LBL}>ตัดยอดภาษีที่ดินและสิ่งปลูกสร้าง *</label><input className="input-field" type="number" min="0" max={Math.min(landRemaining, paymentAmount)} step="0.01" value={landAllocation} onChange={e => changeLandAllocation(e.target.value)} /></div>}
-      {scope !== 'land' && <div><label style={LBL}>ตัดยอดภาษีป้าย *</label><input className="input-field" type="number" min="0" max={Math.min(signRemaining, paymentAmount)} step="0.01" value={signAllocation} onChange={e => changeSignAllocation(e.target.value)} /></div>}
-      <div style={{ gridColumn: '1/-1', display: 'flex', justifyContent: 'space-between', fontSize: 12, color: Math.abs(allocatedTotal-paymentAmount)<.009 ? '#1a8f5a' : '#c0392b' }}><span>รวมยอดตัดภาษี</span><b>฿{formatCurrency(allocatedTotal)} / ฿{formatCurrency(paymentAmount)}</b></div>
+    <div style={{ marginBottom: 14 }}>
+      <label style={LABEL}>ประเภทภาษีที่ต้องการตัดยอด *</label>
+      <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginBottom: 12 }}>
+        {([['land', '🏠 ภาษีที่ดินและสิ่งปลูกสร้าง', hasLand], ['sign', '🪧 ภาษีป้าย', hasSign], ['both', '🏠 + 🪧 ทั้งสองประเภท', hasLand && hasSign]] as const).map(([value, label, enabled]) => <button key={value} type="button" disabled={!enabled} onClick={() => enabled && setScope(value)} style={taxChoiceStyle(scope === value, enabled)}>{label}</button>)}
+      </div>
+      <label style={LABEL}>จัดสรรยอดชำระตามปีและประเภทภาษี *</label>
+      <div style={{ fontSize: 12, color: '#8873b5', marginBottom: 8 }}>ระบุจำนวนเงินที่ต้องการตัดยอดในแต่ละรายการ</div>
+      <div style={ALLOCATION_BOX}>
+        {outstandingYears.map(({ assessment }) => {
+          const yearRows = rows.filter(row => row.year === assessment.year)
+          return <div key={assessment.year} style={YEAR_CARD}>
+            <div style={YEAR_HEADER}><span>ปีภาษี {assessment.year}</span><span>คงเหลือ ฿{formatCurrency(yearRows.reduce((sum, row) => sum + row.remaining, 0))}</span></div>
+            {yearRows.filter(row => scope === 'both' || row.taxType === scope).map(row => <div className="payment-allocation-row" key={row.assessmentId} style={ALLOCATION_ROW}>
+              <span style={{ fontSize: 12, color: '#6b5b95' }}>{row.label}</span>
+              <input className="input-field" type="number" min="0" max={Math.min(row.remaining, paymentAmount)} step="0.01" placeholder="0.00" value={allocations[row.assessmentId] ?? ''} onChange={event => setAllocation(row, event.target.value)} style={{ textAlign: 'right', fontSize: 13 }} />
+              <span style={{ fontSize: 11, color: '#a89cc8', textAlign: 'right' }}>คงเหลือ ฿{formatCurrency(row.remaining)}</span>
+            </div>)}
+          </div>
+        })}
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: Math.abs(allocatedTotal - paymentAmount) < .009 ? '#1a8f5a' : '#c0392b', marginTop: 10 }}><span>รวมยอดที่จัดสรร</span><b>฿{formatCurrency(allocatedTotal)} / ฿{formatCurrency(paymentAmount)}</b></div>
+      </div>
     </div>
-    <div style={{ marginBottom: 14 }}><label style={LBL}>วิธีชำระ *</label><div style={{ display: 'flex', gap: 8 }}>{([['transfer','💳 โอนเงิน'],['cash','💵 เงินสด']] as const).map(([value,label]) => <button key={value} type="button" onClick={() => setMethod(value)} style={{ ...choiceStyle(method===value), flex: 1 }}>{label}</button>)}</div></div>
-    <div style={{ marginBottom: 18 }}><label style={LBL}>{method === 'transfer' ? 'เลขอ้างอิงการโอน' : 'เลขที่ใบเสร็จ'}</label><input className="input-field" value={method === 'transfer' ? reference : receipt} onChange={e => method === 'transfer' ? setReference(e.target.value) : setReceipt(e.target.value)} placeholder={method === 'transfer' ? 'TRF...' : 'RC2569-...'} /></div>
-    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}><button type="button" className="btn-secondary" onClick={onCancel}>ยกเลิก</button><button type="button" className="btn-primary" disabled={saving || !dateTime || paymentAmount <= 0 || Math.abs(allocatedTotal-paymentAmount)>.009} onClick={() => void save()}>{saving ? 'กำลังบันทึก...' : '💾 บันทึกการชำระ'}</button></div>
+    <div style={{ marginBottom: 14 }}><label style={LABEL}>วิธีชำระ *</label><div style={{ display: 'flex', gap: 8 }}>{([['transfer', '💳 โอนเงิน'], ['cash', '💵 เงินสด']] as const).map(([value, label]) => <button key={value} type="button" onClick={() => setMethod(value)} style={{ ...choiceStyle(method === value), flex: 1 }}>{label}</button>)}</div></div>
+    <div style={{ marginBottom: 18 }}><label style={LABEL}>{method === 'transfer' ? 'เลขอ้างอิงการโอน' : 'เลขที่ใบเสร็จ'}</label><input className="input-field" value={method === 'transfer' ? reference : receipt} onChange={event => method === 'transfer' ? setReference(event.target.value) : setReceipt(event.target.value)} placeholder={method === 'transfer' ? 'TRF...' : 'RC2569-...'} /></div>
+    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}><button type="button" className="btn-secondary" onClick={onCancel}>ยกเลิก</button><button type="button" className="btn-primary" disabled={saving || !dateTime || paymentAmount <= 0 || Math.abs(allocatedTotal - paymentAmount) > .009} onClick={() => void save()}>{saving ? 'กำลังบันทึก...' : `💾 บันทึกการชำระงวดที่ ${nextInstallment}`}</button></div>
+    <style>{`@media(max-width:640px){.payment-main-fields{grid-template-columns:1fr!important}.payment-allocation-row{grid-template-columns:1fr 120px!important}.payment-allocation-row>span:last-child{display:none}}`}</style>
   </>
 }
 
-const LBL = { display: 'block', fontSize: 12, fontWeight: 600, color: '#6b5b95', marginBottom: 6 }
-const choiceStyle = (active: boolean) => ({ padding: '8px 12px', borderRadius: 10, cursor: 'pointer', fontFamily: "'Sarabun',sans-serif", fontSize: 12, border: active ? '1.5px solid #7c5cbf' : '1px solid rgba(180,165,230,.35)', background: active ? 'rgba(124,92,191,.1)' : '#fff', color: active ? '#6745ae' : '#6b5b95', fontWeight: active ? 700 : 500 })
+function Summary({ label, value, danger = false }: { label: string; value: string; danger?: boolean }) {
+  return <div style={{ padding: '9px 11px', borderRadius: 10, background: '#fff', border: '1px solid rgba(180,165,230,.24)' }}><div style={{ fontSize: 11, color: '#a89cc8' }}>{label}</div><div style={{ fontSize: 15, fontWeight: 700, color: danger ? '#c0392b' : '#2d2545', marginTop: 3 }}>{value}</div></div>
+}
+
+const PROFILE = { padding: 14, borderRadius: 12, background: 'rgba(240,236,251,.55)', marginBottom: 16 }
+const SUMMARY_GRID = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 12 }
+const INSTALLMENT = { display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 8, padding: '10px 12px', borderRadius: 10, background: 'rgba(124,92,191,.09)', color: '#5f4596', fontSize: 12 }
+const TWO_COLUMNS = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }
+const LABEL = { display: 'block', fontSize: 12, fontWeight: 600, color: '#6b5b95', marginBottom: 6 }
+const ALLOCATION_BOX = { padding: 13, borderRadius: 12, background: 'rgba(240,236,251,.45)' }
+const YEAR_CARD = { padding: 11, borderRadius: 10, background: '#fff', border: '1px solid rgba(180,165,230,.28)', marginBottom: 8 }
+const YEAR_HEADER = { display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 13, fontWeight: 700, color: '#45385e' }
+const ALLOCATION_ROW = { display: 'grid', gridTemplateColumns: '1fr 150px 115px', gap: 10, alignItems: 'center', marginTop: 10 }
+const choiceStyle = (active: boolean) => ({ padding: '9px 12px', borderRadius: 10, cursor: 'pointer', fontFamily: "'Sarabun',sans-serif", fontSize: 13, border: active ? '1.5px solid #7c5cbf' : '1px solid rgba(180,165,230,.35)', background: active ? 'rgba(124,92,191,.1)' : '#fff', color: active ? '#6745ae' : '#6b5b95', fontWeight: active ? 700 : 500 })
+const taxChoiceStyle = (active: boolean, enabled: boolean) => ({ padding: '8px 12px', borderRadius: 10, cursor: enabled ? 'pointer' : 'not-allowed', fontFamily: "'Sarabun',sans-serif", fontSize: 12, border: active && enabled ? '1.5px solid #7c5cbf' : '1px solid rgba(180,165,230,.35)', background: !enabled ? '#eeeeF2' : active ? 'rgba(124,92,191,.1)' : '#fff', color: !enabled ? '#aaa8b0' : active ? '#6745ae' : '#6b5b95', fontWeight: active && enabled ? 700 : 500, opacity: enabled ? 1 : .72 })

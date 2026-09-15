@@ -7,6 +7,7 @@ interface UserApi {
   first_name: string
   last_name: string
   username: string
+  email: string | null
   role: 'OFFICER' | 'DIRECTOR' | 'ADMIN'
   is_active: boolean
   created_at: string
@@ -41,6 +42,7 @@ export async function getUsers(): Promise<User[]> {
     group: user.group_code ?? undefined,
     active: user.is_active,
     username: user.username,
+    email: user.email ?? undefined,
   }))
 }
 
@@ -49,6 +51,7 @@ export interface SaveUserInput {
   first_name: string
   last_name: string
   username: string
+  email?: string | null
   password?: string
   role: string
   group_code: string | null
@@ -79,4 +82,41 @@ export async function updateUserRecord(userId: number, data: SaveUserInput) {
 
 export async function setUserActive(userId: number, active: boolean) {
   return userMutation(`${API_URL}/users/${userId}/active?is_active=${active}`, 'PUT')
+}
+
+export async function resetUserPassword(userId: number, password: string) {
+  return userMutation(`${API_URL}/users/${userId}/password`, 'PUT', { password })
+}
+
+export async function deleteUser(userId: number) {
+  return userMutation(`${API_URL}/users/${userId}`, 'DELETE')
+}
+
+export interface InviteUserInput {
+  employee_code: string
+  first_name: string
+  last_name: string
+  email: string
+  role: string
+  group_code: string | null
+}
+
+export async function inviteUserByEmail(data: InviteUserInput) {
+  return userMutation(`${API_URL}/users/invitations`, 'POST', data)
+}
+
+export interface InvitationDetails {
+  email: string
+  name: string
+  role: string
+  expires_at: string
+}
+
+export async function validateInvitation(token: string): Promise<InvitationDetails> {
+  const result = await userMutation(`${API_URL}/user-invitations/validate`, 'POST', { token })
+  return result.data as InvitationDetails
+}
+
+export async function acceptInvitation(token: string, username: string, password: string) {
+  return userMutation(`${API_URL}/user-invitations/accept`, 'POST', { token, username, password })
 }

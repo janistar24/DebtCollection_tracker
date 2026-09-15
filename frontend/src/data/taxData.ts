@@ -16,7 +16,21 @@ export const getTotalAssessed = (tp: Taxpayer, year: number) => {
 
 export const getTotalPaid = (tp: Taxpayer, year?: number) => tp.payments
   .filter(item => year === undefined || item.taxYear === year)
-  .reduce((sum, item) => sum + item.amount, 0)
+  .reduce((sum, item) => sum + item.allocatedLand + item.allocatedSign, 0)
+
+export const getInstallmentCount = (tp: Taxpayer) =>
+  new Set(tp.payments.map(item => item.id)).size
+
+export const getOutstandingYears = (tp: Taxpayer, throughYear?: number) =>
+  tp.assessments
+    .filter(item => throughYear === undefined || item.year <= throughYear)
+    .map(item => ({
+      assessment: item,
+      landRemaining: getLandRemaining(tp, item.year),
+      signRemaining: getSignRemaining(tp, item.year),
+    }))
+    .filter(item => item.landRemaining + item.signRemaining > 0)
+    .sort((a, b) => a.assessment.year - b.assessment.year)
 
 export const getLandPaid = (tp: Taxpayer, year?: number) => tp.payments
   .filter(item => year === undefined || item.taxYear === year)

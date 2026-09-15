@@ -5,12 +5,13 @@ import { useApp } from '../context/AppContext'
 import StatusBadge from '../components/StatusBadge'
 import Modal from '../components/Modal'
 import EmptyState from '../components/EmptyState'
+import BuddhistDateInput from '../components/BuddhistDateInput'
 import type { FollowUp as _FU } from '../types'
 import {
   getTotalAssessed, getTotalRemaining, getPaymentStatus,
   getFollowStatus, getLastFollowUp, formatCurrency, formatDate,
   CURRENT_YEAR, getTaxpayerName, getLandRemaining,
-  getSignRemaining, getAssessment
+  getSignRemaining, getAssessment, getInstallmentCount, getOutstandingYears
 } from '../data/taxData'
 import type { FollowUp } from '../types'
 import { createFollowUpLog } from '../api/follow_up_logs'
@@ -240,7 +241,7 @@ function _LegacyCallLogModal({ onClose, onSave }: { onClose: () => void; onSave:
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12, padding: '10px 12px', background: 'rgba(240,236,251,0.4)', borderRadius: 10 }}>
                   <div>
                     <div style={{ fontSize: 12, fontWeight: 600, color: '#6b5b95', marginBottom: 6 }}>วันที่นัดชำระ</div>
-                    <input className="input-field" type="date" value={fuPromiseDate} onChange={e => setFuPromiseDate(e.target.value)} />
+                    <BuddhistDateInput value={fuPromiseDate} onChange={setFuPromiseDate} />
                   </div>
                   <div>
                     <div style={{ fontSize: 12, fontWeight: 600, color: '#6b5b95', marginBottom: 6 }}>ยอดที่แจ้งว่าจะชำระ (บาท)</div>
@@ -258,7 +259,7 @@ function _LegacyCallLogModal({ onClose, onSave }: { onClose: () => void; onSave:
 
               <div style={{ marginBottom: 18 }}>
                 <div style={{ fontSize: 12, fontWeight: 600, color: '#6b5b95', marginBottom: 6 }}>วันที่ติดตามครั้งถัดไป</div>
-                <input className="input-field" type="date" value={fuNextDate} onChange={e => setFuNextDate(e.target.value)} />
+                <BuddhistDateInput value={fuNextDate} onChange={setFuNextDate} />
               </div>
 
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
@@ -551,7 +552,7 @@ function CallLogModal({ onClose, onSave }: { onClose: () => void; onSave: (fu: O
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 9 }}>
                     <label style={{ fontSize: 11, color: '#6b5b95' }}>
                       วันที่และเวลา
-                      <input className="input-field" type="datetime-local" value={fuDate} onChange={e => setFuDate(e.target.value)} style={{ marginTop: 5, padding: '8px 9px', fontSize: 12 }} />
+                      <BuddhistDateInput value={fuDate} onChange={setFuDate} includeTime required style={{ marginTop: 5, padding: '8px 9px', fontSize: 12 }} />
                     </label>
                     <label style={{ fontSize: 11, color: '#6b5b95' }}>
                       ช่องทาง
@@ -594,7 +595,7 @@ function CallLogModal({ onClose, onSave }: { onClose: () => void; onSave: (fu: O
                       <>
                         <label style={{ fontSize: 11, color: '#6b5b95' }}>
                           วันที่นัดชำระ
-                          <input className="input-field" type="date" value={fuPromiseDate} onChange={e => setFuPromiseDate(e.target.value)} style={{ marginTop: 5, padding: '8px 9px', fontSize: 12 }} />
+                          <BuddhistDateInput value={fuPromiseDate} onChange={setFuPromiseDate} style={{ marginTop: 5, padding: '8px 9px', fontSize: 12 }} />
                         </label>
                         <label style={{ fontSize: 11, color: '#6b5b95' }}>
                           ยอดที่นัดชำระ
@@ -611,7 +612,7 @@ function CallLogModal({ onClose, onSave }: { onClose: () => void; onSave: (fu: O
                     {(fuResult === 'no_answer' || fuResult === 'callback') && (
                       <label style={{ gridColumn: '1 / -1', fontSize: 11, color: '#6b5b95' }}>
                         วันที่ติดตามครั้งถัดไป
-                        <input className="input-field" type="date" value={fuNextDate} onChange={e => setFuNextDate(e.target.value)} style={{ marginTop: 5, padding: '8px 9px', fontSize: 12 }} />
+                        <BuddhistDateInput value={fuNextDate} onChange={setFuNextDate} style={{ marginTop: 5, padding: '8px 9px', fontSize: 12 }} />
                       </label>
                     )}
                   </div>
@@ -1410,6 +1411,9 @@ export default function DashboardPage() {
                 {filteredTps.map((tp, i) => {
                   const assess = tp.assessments.find(a => a.year === selectedYear)
                   const remaining = getTotalRemaining(tp, selectedYear)
+                  const outstandingYears = getOutstandingYears(tp, selectedYear)
+                  const totalOutstanding = outstandingYears.reduce((sum, item) => sum + item.landRemaining + item.signRemaining, 0)
+                  const installmentCount = getInstallmentCount(tp)
                   const lastFu = getLastFollowUp(tp, selectedYear)
                   const payStat = getPaymentStatus(tp, selectedYear)
                   const followStat = getFollowStatus(tp, selectedYear)
@@ -1420,7 +1424,10 @@ export default function DashboardPage() {
                     <tr key={tp.id} className="table-row-hover" style={{ borderBottom: '1px solid rgba(200,190,240,0.15)' }}>
                       <td style={{ padding: '10px 14px', color: '#a89cc8', fontSize: 12 }}>{i + 1}</td>
                       <td style={{ padding: '10px 14px', fontFamily: 'monospace', fontSize: 11, color: '#7c5cbf' }}>{tp.ownerCode}</td>
-                      <td style={{ padding: '10px 14px', fontWeight: 500, color: '#2d2545' }}>{getTaxpayerName(tp)}</td>
+                      <td style={{ padding: '10px 14px', fontWeight: 500, color: '#2d2545' }}>
+                        {getTaxpayerName(tp)}
+                        {outstandingYears.length > 1 && <div style={{ marginTop: 3 }}><span style={{ display: 'inline-block', padding: '2px 7px', borderRadius: 999, background: 'rgba(124,92,191,.1)', color: '#6b4aad', fontSize: 10 }}>มียอดค้าง {outstandingYears.length} ปีภาษี</span></div>}
+                      </td>
                       <td style={{ padding: '10px 14px' }}>
                         {remainingTypes.length === 0
                           ? <span style={{ fontSize: 11, color: '#a89cc8' }}>ชำระครบแล้ว</span>
@@ -1432,13 +1439,14 @@ export default function DashboardPage() {
                         }
                       </td>
                       <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 600, color: '#2d2545' }}>฿{formatCurrency(getTotalAssessed(tp, selectedYear))} บาท</td>
-                      <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 700, color: remaining > 0 ? '#c0392b' : '#1a8f5a' }}>฿{formatCurrency(remaining)} บาท</td>
+                      <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 700, color: totalOutstanding > 0 ? '#c0392b' : '#1a8f5a' }}>฿{formatCurrency(totalOutstanding)} บาท{outstandingYears.length > 1 && <div style={{ color: '#a89cc8', fontSize: 10, fontWeight: 500, marginTop: 2 }}>รวมทุกปีภาษี</div>}</td>
                       <td style={{ padding: '10px 14px', color: '#8873b5', fontSize: 12 }}>{lastFu ? formatDate(lastFu.date) : '-'}</td>
                       <td style={{ padding: '10px 14px', fontSize: 12, color: '#6b5b95', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lastFu?.detail ?? '-'}</td>
                       <td style={{ padding: '10px 14px', fontSize: 12, color: '#7c5cbf' }}>{lastFu?.promiseDate ? formatDate(lastFu.promiseDate) : '-'}</td>
                       <td style={{ padding: '10px 14px' }}>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                           <StatusBadge status={payStat} size="sm" />
+                          {installmentCount > 0 && <span style={{ color: '#8873b5', fontSize: 10 }}>ชำระล่าสุดงวดที่ {installmentCount}</span>}
                           {payStat !== 'paid' && <StatusBadge status={followStat} size="sm" />}
                         </div>
                       </td>

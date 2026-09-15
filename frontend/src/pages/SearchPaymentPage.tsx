@@ -14,10 +14,13 @@ import {
   getSignRemaining,
   getPaymentStatus,
   getLastFollowUp,
+  getInstallmentCount,
+  getOutstandingYears,
   CURRENT_YEAR
 } from '../data/taxData'
 import type { Taxpayer, Payment } from '../types'
 import PaymentForm from '../components/PaymentForm'
+import BuddhistDateInput from '../components/BuddhistDateInput'
 import { readPaymentSlip } from '../api/slips'
 import { createCompletePayment } from '../api/payments'
 
@@ -322,6 +325,11 @@ export default function SearchPaymentPage() {
 
   // Confirm payment
   const drawerRemaining = drawerTp ? getTotalRemaining(drawerTp, selectedYear) : 0
+  const drawerOutstandingYears = drawerTp ? getOutstandingYears(drawerTp, selectedYear) : []
+  const drawerTotalOutstanding = drawerOutstandingYears.reduce(
+    (sum, item) => sum + item.landRemaining + item.signRemaining, 0
+  )
+  const drawerInstallmentCount = drawerTp ? getInstallmentCount(drawerTp) : 0
   const payAmt = parseFloat(searchedAmt) || drawerRemaining
   const toAllocate = Math.min(payAmt, drawerRemaining)
   const change = payAmt - toAllocate
@@ -722,29 +730,29 @@ export default function SearchPaymentPage() {
                     </div>
                   </div>
 
-                  {/* Tax summary */}
-                  <div style={{ marginBottom: 14 }}>
-                    <div style={{ fontSize: 11, color: '#a89cc8', fontWeight: 600, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>ข้อมูลภาษี ปี {selectedYear}</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
                     {[
-                      ['ยอดประเมิน', `฿${formatCurrency(getTotalAssessed(drawerTp, selectedYear))}`, '#2d2545'],
-                      ['ชำระแล้ว', `฿${formatCurrency(getTotalAssessed(drawerTp, selectedYear) - drawerRemaining)}`, '#1a8f5a'],
-                      ['ยอดคงเหลือ', `฿${formatCurrency(drawerRemaining)}`, '#c0392b'],
-                    ].map(([l, v, c]) => (
-                      <div key={String(l)} style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 0', borderBottom: '1px solid rgba(200,190,240,0.2)' }}>
-                        <span style={{ fontSize: 12, color: '#a89cc8' }}>{l}</span>
-                        <span style={{ fontSize: 13, fontWeight: 700, color: String(c) }}>{String(v)}</span>
-                      </div>
-                    ))}
+                      ['ยอดประเมินภาษีปีปัจจุบัน', getTotalAssessed(drawerTp, selectedYear), '#2d2545'],
+                      ['ยอดหนี้คงเหลือ', drawerTotalOutstanding, '#c0392b'],
+                    ].map(([label, value, color]) => <div key={String(label)} style={{ padding: '10px 11px', borderRadius: 10, border: '1px solid rgba(180,165,230,.25)', background: '#fff' }}>
+                      <div style={{ fontSize: 11, color: '#a89cc8' }}>{label}</div>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: String(color), marginTop: 3 }}>฿{formatCurrency(Number(value))}</div>
+                    </div>)}
+                  </div>
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 12, color: '#6b5b95', fontWeight: 700, marginBottom: 8 }}>ยอดค้างแยกตามปีภาษี</div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '9px 11px', borderRadius: 10, background: 'rgba(124,92,191,.09)', color: '#5f4596', fontSize: 12, marginBottom: 8 }}><span>เคยชำระมาแล้วจำนวน <b>{drawerInstallmentCount} งวด</b></span><span>รายการนี้จะเป็น <b>งวดที่ {drawerInstallmentCount + 1}</b></span></div>
+                    {drawerOutstandingYears.map(({ assessment, landRemaining, signRemaining }) => <div key={assessment.year} style={{ display: 'grid', gridTemplateColumns: '65px 1fr auto', gap: 8, padding: '8px 10px', borderRadius: 9, background: 'rgba(240,236,251,.45)', marginBottom: 5, alignItems: 'center' }}><b style={{ fontSize: 12, color: '#45385e' }}>ปี {assessment.year}</b><span style={{ fontSize: 11, color: '#8873b5' }}>{[landRemaining > 0 ? `ภาษีที่ดินฯ ฿${formatCurrency(landRemaining)}` : '', signRemaining > 0 ? `ภาษีป้าย ฿${formatCurrency(signRemaining)}` : ''].filter(Boolean).join(' · ')}</span><b style={{ fontSize: 12, color: '#c0392b' }}>฿{formatCurrency(landRemaining + signRemaining)}</b></div>)}
                   </div>
 
                   {/* Last follow-up */}
                   {(() => {
                     const lastFu = getLastFollowUp(drawerTp)
                     return lastFu ? (
-                      <div style={{ marginBottom: 14, padding: '10px 12px', background: 'rgba(218,237,248,0.4)', borderRadius: 10, fontSize: 12 }}>
-                        <div style={{ fontWeight: 600, color: '#3a5fbf', marginBottom: 6 }}>📞 การติดตามล่าสุด</div>
-                        <div style={{ color: '#6b5b95' }}>{formatDateTime(lastFu.date)}</div>
-                        <div style={{ color: '#6b5b95' }}>ผล: {CALL_RESULT_LABELS[lastFu.result ?? ''] ?? '-'}</div>
+                      <div style={{ marginBottom: 14, padding: '12px 14px', background: 'linear-gradient(135deg,rgba(240,236,251,.7),rgba(218,237,248,.5))', border: '1px solid rgba(180,165,230,.25)', borderRadius: 11, fontSize: 12 }}>
+                        <div style={{ fontWeight: 700, color: '#5f4596', marginBottom: 8, fontSize: 12 }}>☎ การติดตามล่าสุด</div>
+                        <div style={{ color: '#45385e', fontSize: 12, fontWeight: 700 }}>{formatDateTime(lastFu.date)}</div>
+                        <div style={{ color: '#7c5cbf', fontSize: 12, fontWeight: 700, marginTop: 3 }}>{CALL_RESULT_LABELS[lastFu.result ?? ''] ?? '-'}</div>
                         {lastFu.detail && <div style={{ color: '#6b5b95', marginTop: 3, fontStyle: 'italic' }}>"{lastFu.detail}"</div>}
                         {lastFu.promiseDate && (
                           <div style={{ marginTop: 4, color: '#7c5cbf', fontWeight: 600 }}>
@@ -818,7 +826,7 @@ export default function SearchPaymentPage() {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, marginBottom: 14 }}>
                 <div>
                   <label style={LBL}>วันที่ชำระ</label>
-                  <input className="input-field" type="date" value={payDate} onChange={e => setPayDate(e.target.value)} />
+                  <BuddhistDateInput value={payDate} onChange={setPayDate} required />
                 </div>
                 <div>
                   <label style={LBL}>เวลาชำระ</label>
@@ -912,7 +920,7 @@ export default function SearchPaymentPage() {
                     </div>
                     <div>
                       <label style={LBL}>วันที่ชำระ</label>
-                      <input className="input-field" type="date" value={cashDate} onChange={e => setCashDate(e.target.value)} />
+                      <BuddhistDateInput value={cashDate} onChange={setCashDate} required />
                     </div>
                   </div>
                   <div style={{ marginBottom: 20 }}>
@@ -1121,7 +1129,7 @@ function DirectPaymentTab() {
               </div>
               <div>
                 <label style={LBL}>วันที่ชำระ</label>
-                <input className="input-field" type="date" value={payDate} onChange={e => setPayDate(e.target.value)} />
+                <BuddhistDateInput value={payDate} onChange={setPayDate} required />
               </div>
             </div>
 

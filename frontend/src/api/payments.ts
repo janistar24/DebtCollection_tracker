@@ -77,13 +77,16 @@ export async function getAllocatedPayments(): Promise<Payment[]> {
     throw new Error(errorMessage(result, 'โหลดข้อมูลการชำระไม่สำเร็จ'))
   }
 
+  // หนึ่ง payment สามารถจัดสรรให้หนี้หลายปีได้ จึงสร้างข้อมูลสรุปแยกต่อปี
+  // โดยยังคง payment_id เดิมไว้เพื่อให้นับจำนวนงวดแบบ distinct ได้ถูกต้อง
   const grouped = new Map<string, Payment>()
   for (const row of result.data as AllocationApi[]) {
     const id = String(row.payment_id)
-    const payment = grouped.get(id) ?? {
+    const groupKey = `${id}-${row.tax_year}`
+    const payment = grouped.get(groupKey) ?? {
       id,
       taxpayerId: String(row.taxpayer_id),
-      amount: Number(row.payment_amount),
+      amount: 0,
       date: row.paid_at ?? row.payment_date,
       method: row.payment_method.toLowerCase() as PayMethod,
       refNo: row.reference_no ?? undefined,
@@ -95,7 +98,8 @@ export async function getAllocatedPayments(): Promise<Payment[]> {
     }
     if (row.tax_type === 'LAND_BUILDING') payment.allocatedLand += Number(row.allocated_amount)
     if (row.tax_type === 'SIGN') payment.allocatedSign += Number(row.allocated_amount)
-    grouped.set(id, payment)
+    payment.amount = payment.allocatedLand + payment.allocatedSign
+    grouped.set(groupKey, payment)
   }
   return [...grouped.values()]
 }

@@ -19,6 +19,7 @@ class Users:
                 u.last_name,
                 u.role,
                 u.username,
+                u.email,
                 u.is_active,
                 u.created_at,
                 u.updated_at,
@@ -70,6 +71,7 @@ class Users:
                 u.last_name,
                 u.role,
                 u.username,
+                u.email,
                 u.is_active,
                 u.created_at,
                 u.updated_at,
@@ -107,6 +109,7 @@ class Users:
                 u.role,
                 u.username,
                 u.password_hash,
+                u.email,
                 u.is_active,
                 ra.group_code
 

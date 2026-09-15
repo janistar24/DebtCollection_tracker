@@ -5,6 +5,7 @@ import Sidebar from './components/Sidebar'
 import Header from './components/Header'
 
 const LoginPage = lazy(() => import('./pages/LoginPage'))
+const AcceptInvitePage = lazy(() => import('./pages/AcceptInvitePage'))
 const DashboardPage = lazy(() => import('./pages/DashboardPage'))
 const TaxpayerListPage = lazy(() => import('./pages/TaxpayerListPage'))
 const AddTaxpayerPage = lazy(() => import('./pages/AddTaxpayerPage'))
@@ -55,6 +56,7 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={currentUser ? <Navigate to="/dashboard" replace /> : <LoginPage />} />
+      <Route path="/accept-invite" element={<AcceptInvitePage />} />
       <Route path="/*" element={<ProtectedLayout />} />
     </Routes>
   )
