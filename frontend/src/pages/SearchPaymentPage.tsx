@@ -23,6 +23,7 @@ import PaymentForm from '../components/PaymentForm'
 import BuddhistDateInput from '../components/BuddhistDateInput'
 import { readPaymentSlip } from '../api/slips'
 import { createCompletePayment } from '../api/payments'
+import { getCrossGroupPaymentMatches, type CrossGroupMatch } from '../api/debt_management'
 
 const CALL_RESULT_LABELS: Record<string, string> = {
   no_answer: 'ไม่รับสาย', reached: 'ติดต่อได้', callback: 'จะโทรกลับ',
@@ -31,6 +32,7 @@ const CALL_RESULT_LABELS: Record<string, string> = {
 
 interface Candidate {
   tp: Taxpayer
+  taxYear: number
 
   taxType: 'land' | 'sign' | 'both'
 
@@ -59,9 +61,9 @@ const getLocalDateKey = (value: string | Date) => {
 
 const isInTaskScope = (tp: Taxpayer, year: number, scope: TaskSearchScope) => {
   const yearFollowUps = tp.followUps.filter(followUp => followUp.taxYear === year)
-  const isTask = tp.assessments.some(a => a.year === year)
-    && getPaymentStatus(tp, year) !== 'paid'
-    && yearFollowUps.length > 0
+  const hasOutstandingDebt = getOutstandingYears(tp, year)
+    .some(item => item.landRemaining + item.signRemaining > 0)
+  const isTask = hasOutstandingDebt && yearFollowUps.length > 0
   if (!isTask) return false
 
   const contactedToday = yearFollowUps.some(fu => getLocalDateKey(fu.date) === getLocalDateKey(new Date()))
@@ -82,6 +84,9 @@ export default function SearchPaymentPage() {
   const [candidates, setCandidates] = useState<Candidate[]>([])
   const [searched, setSearched] = useState(false)
   const [searchedAmt, setSearchedAmt] = useState('')
+  const [crossGroupMatches, setCrossGroupMatches] = useState<CrossGroupMatch[]>([])
+  const [crossGroupLoading, setCrossGroupLoading] = useState(false)
+  const [crossGroupError, setCrossGroupError] = useState('')
   const [slipReading, setSlipReading] = useState(false)
   const [slipMessage, setSlipMessage] = useState('')
   const [slipDragging, setSlipDragging] = useState(false)
@@ -89,6 +94,7 @@ export default function SearchPaymentPage() {
 
   // Drawer state
   const [drawerTp, setDrawerTp] = useState<Taxpayer | null>(null)
+  const [drawerTaxYear, setDrawerTaxYear] = useState(selectedYear)
   const [showPayModal, setShowPayModal] = useState(false)
 
   // Cash search
@@ -119,10 +125,12 @@ export default function SearchPaymentPage() {
   const canRecordPayment = currentUser != null
   const GROUPS = ['ก-น', 'บ-ล', 'ส-ศ', 'ว-ฮ และบริษัท']
 
-  const runSearch = () => {
+  const runSearch = async () => {
     const amt = parseFloat(amtInput)
     const name = nameSearch.toLowerCase().trim()
     if (!amt && !name) return
+    setCrossGroupMatches([])
+    setCrossGroupError('')
 
     const pool = taxpayers.filter(tp => {
       if (!isDirector && tp.group !== currentUser?.group) return false
@@ -131,26 +139,8 @@ export default function SearchPaymentPage() {
     })
 
   const results: Candidate[] = pool
-    .flatMap(tp => {
-
-      const assess = tp.assessments.find(
-        a => a.year === selectedYear
-      )
-
-      if (!assess) {
-        return []
-      }
-
-      const landRemaining =
-        getLandRemaining(tp, selectedYear)
-
-      const signRemaining =
-        getSignRemaining(tp, selectedYear)
-
-      const totalRemaining =
-        getTotalRemaining(tp, selectedYear)
-
-
+    .flatMap(tp => getOutstandingYears(tp, selectedYear).flatMap(({ assessment: assess, landRemaining, signRemaining }) => {
+      const totalRemaining = landRemaining + signRemaining
       const candidates: Candidate[] = []
 
       const tolerance =
@@ -176,6 +166,7 @@ export default function SearchPaymentPage() {
 
             candidates.push({
               tp,
+              taxYear: assess.year,
 
               taxType: 'land',
 
@@ -216,6 +207,7 @@ export default function SearchPaymentPage() {
 
             candidates.push({
               tp,
+              taxYear: assess.year,
 
               taxType: 'sign',
 
@@ -257,6 +249,7 @@ export default function SearchPaymentPage() {
 
           candidates.push({
             tp,
+            taxYear: assess.year,
 
             taxType: 'both',
 
@@ -279,7 +272,7 @@ export default function SearchPaymentPage() {
 
 
       return candidates
-    })
+    }))
 
     .sort(
       (a, b) =>
@@ -292,6 +285,16 @@ export default function SearchPaymentPage() {
     setCandidates(results)
     setSearched(true)
     setSearchedAmt(amtInput)
+    if (amt > 0 && results.length === 0) {
+      try {
+        setCrossGroupLoading(true)
+        setCrossGroupMatches(await getCrossGroupPaymentMatches(amt, selectedYear))
+      } catch (error) {
+        setCrossGroupError(error instanceof Error ? error.message : 'ค้นหายอดจากกลุ่มอื่นไม่สำเร็จ')
+      } finally {
+        setCrossGroupLoading(false)
+      }
+    }
   }
 
   const handleSlipFile = async (file?: File) => {
@@ -324,7 +327,7 @@ export default function SearchPaymentPage() {
   const nearCandidates = candidates.filter(c => !c.exact)
 
   // Confirm payment
-  const drawerRemaining = drawerTp ? getTotalRemaining(drawerTp, selectedYear) : 0
+  const drawerRemaining = drawerTp ? getTotalRemaining(drawerTp, drawerTaxYear) : 0
   const drawerOutstandingYears = drawerTp ? getOutstandingYears(drawerTp, selectedYear) : []
   const drawerTotalOutstanding = drawerOutstandingYears.reduce(
     (sum, item) => sum + item.landRemaining + item.signRemaining, 0
@@ -336,9 +339,9 @@ export default function SearchPaymentPage() {
 
   const handleConfirm = async () => {
     if (!drawerTp) return
-    const assess = drawerTp.assessments.find(a => a.year === selectedYear)
-    const allocLand = Math.min(toAllocate, getLandRemaining(drawerTp, selectedYear))
-    const allocSign = Math.min(toAllocate - allocLand, getSignRemaining(drawerTp, selectedYear))
+    const assess = drawerTp.assessments.find(a => a.year === drawerTaxYear)
+    const allocLand = Math.min(toAllocate, getLandRemaining(drawerTp, drawerTaxYear))
+    const allocSign = Math.min(toAllocate - allocLand, getSignRemaining(drawerTp, drawerTaxYear))
     const allocations = [
       ...(allocLand > 0 && assess?.landAssessmentId ? [{ assessment_id: Number(assess.landAssessmentId), allocated_amount: allocLand }] : []),
       ...(allocSign > 0 && assess?.signAssessmentId ? [{ assessment_id: Number(assess.signAssessmentId), allocated_amount: allocSign }] : []),
@@ -362,14 +365,14 @@ export default function SearchPaymentPage() {
         refNo: payMethod === 'transfer' ? payRef : undefined,
         receiptNo: payMethod === 'cash' ? payReceipt : undefined,
         allocatedLand: allocLand, allocatedSign: allocSign,
-        recordedBy: currentUser?.id ?? '', taxYear: selectedYear
+        recordedBy: currentUser?.id ?? '', taxYear: drawerTaxYear
       }
       addPayment(pay)
       void refreshData().catch(error => console.error('รีเฟรชข้อมูลหลังบันทึกการชำระไม่สำเร็จ:', error))
       setSaved(true); showSuccessToast()
       setTimeout(() => {
         setSaved(false); setShowPayModal(false); setDrawerTp(null)
-        setCandidates(prev => prev.filter(c => c.tp.id !== drawerTp.id))
+        setCandidates(prev => prev.filter(c => !(c.tp.id === drawerTp.id && c.taxYear === drawerTaxYear)))
       }, 1400)
     } catch (error) {
       alert(error instanceof Error ? error.message : 'บันทึกการชำระไม่สำเร็จ')
@@ -484,12 +487,12 @@ export default function SearchPaymentPage() {
               <input ref={inputRef} className="input-field" type="number" step="0.01"
                 placeholder="เช่น 101.00" value={amtInput}
                 onChange={e => setAmtInput(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && runSearch()}
+                onKeyDown={e => e.key === 'Enter' && void runSearch()}
                 style={{ width: 200, fontSize: 18, fontWeight: 600, padding: '11px 16px' }} />
               <span style={{ fontSize: 14, color: '#a89cc8', whiteSpace: 'nowrap' }}>บาท</span>
             </div>
           </div>
-          <button className="btn-primary" onClick={runSearch}
+          <button className="btn-primary" onClick={() => void runSearch()}
             style={{ alignSelf: 'flex-end', padding: '11px 28px', fontSize: 15 }}>
             🔍 ตรวจสอบยอดรับชำระ
           </button>
@@ -607,13 +610,33 @@ export default function SearchPaymentPage() {
         <div>
           {candidates.length === 0 ? (
             <div className="glass-card" style={{ padding: '32px 24px' }}>
-              <EmptyState icon="🔍" title={`ไม่พบยอดภาษีที่ตรงหรือใกล้เคียงกับ ฿${searchedAmt}`}
-                sub="ลองค้นหาจากชื่อหรือรหัสเจ้าของทรัพย์สิน" />
-              <div style={{ textAlign: 'center', marginTop: 8 }}>
-                <button className="btn-secondary" onClick={() => { setAmtInput(''); setNameSearch(''); inputRef.current?.focus() }} style={{ fontSize: 13 }}>
-                  ค้นหาจากชื่อหรือรหัส
-                </button>
-              </div>
+              {crossGroupLoading ? <div style={{ textAlign: 'center', color: '#7c5cbf', padding: 16 }}>กำลังตรวจสอบยอดจากกลุ่มรับผิดชอบอื่น...</div> : crossGroupMatches.length > 0 ? <>
+                <div style={{ padding: '12px 14px', borderRadius: 11, background: '#fff8e6', border: '1px solid rgba(215,156,35,.28)', color: '#73500d', fontSize: 13, marginBottom: 14 }}>
+                  ไม่พบยอดที่ตรงในกลุ่มที่กำลังค้นหา แต่พบรายการจากกลุ่มรับผิดชอบอื่น กรุณาประสานเจ้าหน้าที่ของกลุ่มนั้นก่อนบันทึกการชำระ
+                </div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: '#2d2545', marginBottom: 9 }}>พบยอดตรงหรือใกล้เคียงจากกลุ่มอื่น {crossGroupMatches.length} รายการ</div>
+                <div style={{ display: 'grid', gap: 8 }}>
+                  {crossGroupMatches.map((match, index) => {
+                    const name = match.taxpayer_type === 'COMPANY' ? match.company_name : `${match.first_name ?? ''} ${match.last_name ?? ''}`.trim()
+                    const exact = Math.abs(match.difference) < .01
+                    const typeLabel = match.match_type === 'LAND_BUILDING' ? 'ภาษีที่ดินและสิ่งปลูกสร้าง' : match.match_type === 'SIGN' ? 'ภาษีป้าย' : 'ยอดรวมทั้งสองประเภท'
+                    return <div key={`${match.taxpayer_id}-${match.tax_year}-${match.match_type}-${index}`} style={{ display: 'grid', gridTemplateColumns: 'minmax(180px,1fr) auto auto', gap: 12, alignItems: 'center', padding: '11px 13px', borderRadius: 11, background: 'rgba(240,236,251,.5)', border: '1px solid rgba(180,165,230,.22)' }}>
+                      <div><div style={{ fontSize: 13.5, fontWeight: 700, color: '#302747' }}>{name || 'ไม่ระบุชื่อ'}</div><div style={{ fontSize: 11.5, color: '#8879aa', marginTop: 2 }}>{match.owner_code || 'ไม่มีรหัส'} · ปีภาษี {match.tax_year} · {typeLabel}</div></div>
+                      <span style={{ padding: '4px 9px', borderRadius: 999, background: '#ece5fb', color: '#6548a1', fontSize: 12, fontWeight: 700 }}>กลุ่ม {match.group_code}</span>
+                      <div style={{ textAlign: 'right' }}><div style={{ fontSize: 14, fontWeight: 700, color: '#c0392b' }}>฿{formatCurrency(match.match_amount)}</div><div style={{ fontSize: 10.5, color: exact ? '#168653' : '#8a6c2b' }}>{exact ? 'ยอดตรง' : `ต่าง ฿${formatCurrency(Math.abs(match.difference))}`}</div></div>
+                    </div>
+                  })}
+                </div>
+              </> : <>
+                <EmptyState icon="🔍" title={`ไม่พบยอดภาษีที่ตรงหรือใกล้เคียงกับ ฿${searchedAmt}`}
+                  sub="ไม่พบทั้งในกลุ่มที่รับผิดชอบและกลุ่มอื่น ลองค้นหาจากชื่อหรือรหัสเจ้าของทรัพย์สิน" />
+                {crossGroupError && <div style={{ textAlign: 'center', color: '#b42318', fontSize: 12, marginTop: 8 }}>{crossGroupError}</div>}
+                <div style={{ textAlign: 'center', marginTop: 8 }}>
+                  <button className="btn-secondary" onClick={() => { setAmtInput(''); setNameSearch(''); inputRef.current?.focus() }} style={{ fontSize: 13 }}>
+                    ค้นหาจากชื่อหรือรหัส
+                  </button>
+                </div>
+              </>}
             </div>
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 380px', gap: 20, alignItems: 'start', grid: drawerTp ? 'unset' : 'none' }}>
@@ -648,17 +671,17 @@ export default function SearchPaymentPage() {
                       <tbody>
                         {candidates.map((c, i) => {
                           const { tp } = c
-                          const assess = tp.assessments.find(a => a.year === selectedYear)
-                          const assessed = getTotalAssessed(tp, selectedYear)
-                          const remaining = getTotalRemaining(tp, selectedYear)
+                          const assess = tp.assessments.find(a => a.year === c.taxYear)
+                          const assessed = getTotalAssessed(tp, c.taxYear)
+                          const remaining = getTotalRemaining(tp, c.taxYear)
                           const paid = assessed - remaining
                           const taxType = [assess?.landAmount ? 'ภาษีที่ดินและสิ่งปลูกสร้าง' : null, assess?.signAmount ? 'ป้าย' : null].filter(Boolean).join('+')
-                          const isSelected = drawerTp?.id === tp.id
+                          const isSelected = drawerTp?.id === tp.id && drawerTaxYear === c.taxYear
                           const diffSign = c.diff >= 0 ? '+' : ''
 
                           return (
                             <tr 
-                              key={`${tp.id}-${c.taxType}`}
+                              key={`${tp.id}-${c.taxYear}-${c.taxType}`}
                               style={{
                                 borderBottom: '1px solid rgba(200,190,240,0.15)',
                                 background: isSelected ? 'rgba(124,92,191,0.06)' : undefined,
@@ -673,7 +696,7 @@ export default function SearchPaymentPage() {
                               <td style={{ ...TD, fontFamily: 'monospace', fontSize: 11, color: '#7c5cbf' }}>{tp.ownerCode}</td>
                               <td style={{ ...TD, fontWeight: 500, color: '#2d2545', whiteSpace: 'nowrap' }}>{getTaxpayerName(tp)}</td>
                               <td style={{ ...TD, fontSize: 12, color: '#6b5b95' }}>{taxType || '-'}</td>
-                              <td style={{ ...TD, fontSize: 12, color: '#a89cc8' }}>{selectedYear}</td>
+                              <td style={{ ...TD, fontSize: 12, color: '#a89cc8' }}>{c.taxYear}</td>
                               <td style={{ ...TD, textAlign: 'right' }}>฿{formatCurrency(c.assessedForType)}</td>
                               <td style={{ ...TD, fontSize: 12, color: '#7c5cbf', fontWeight: 600 }}> {c.taxType === 'land' ? 'ภาษีที่ดินและสิ่งปลูกสร้าง' : c.taxType === 'sign' ? 'ภาษีป้าย' : 'ยอดรวม'} </td>
                               <td style={{ ...TD, textAlign: 'right', color: '#1a8f5a' }}>฿{formatCurrency(paid)}</td>
@@ -688,10 +711,10 @@ export default function SearchPaymentPage() {
                                   }}>{diffSign}{formatCurrency(c.diff)}</span>
                                 )}
                               </td>
-                              <td style={TD}><StatusBadge status={getPaymentStatus(tp, selectedYear)} size="sm" /></td>
+                              <td style={TD}><StatusBadge status={getPaymentStatus(tp, c.taxYear)} size="sm" /></td>
                               <td style={TD}>
                                 <button className="btn-primary"
-                                  onClick={() => { setDrawerTp(tp); setPayDate(new Date().toISOString().slice(0, 10)); setPayTime(new Date().toTimeString().slice(0, 5)); setPayRef(''); setPayReceipt(''); setPayMethod('transfer') }}
+                                  onClick={() => { setDrawerTp(tp); setDrawerTaxYear(c.taxYear); setPayDate(new Date().toISOString().slice(0, 10)); setPayTime(new Date().toTimeString().slice(0, 5)); setPayRef(''); setPayReceipt(''); setPayMethod('transfer') }}
                                   style={{ fontSize: 12, padding: '6px 14px', background: isSelected ? 'linear-gradient(135deg,#5a3a9f,#7c5cbf)' : undefined }}>
                                   ตรวจสอบ
                                 </button>
@@ -732,7 +755,7 @@ export default function SearchPaymentPage() {
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
                     {[
-                      ['ยอดประเมินภาษีปีปัจจุบัน', getTotalAssessed(drawerTp, selectedYear), '#2d2545'],
+                      [`ยอดประเมินภาษี ปี ${drawerTaxYear}`, getTotalAssessed(drawerTp, drawerTaxYear), '#2d2545'],
                       ['ยอดหนี้คงเหลือ', drawerTotalOutstanding, '#c0392b'],
                     ].map(([label, value, color]) => <div key={String(label)} style={{ padding: '10px 11px', borderRadius: 10, border: '1px solid rgba(180,165,230,.25)', background: '#fff' }}>
                       <div style={{ fontSize: 11, color: '#a89cc8' }}>{label}</div>
@@ -791,7 +814,7 @@ export default function SearchPaymentPage() {
       {/* Confirm Payment Modal */}
       {canRecordPayment && showPayModal && drawerTp && (
         <Modal title="ยืนยันการชำระ" onClose={() => setShowPayModal(false)} maxWidth="500px">
-          <PaymentForm key={`${drawerTp.id}-${selectedYear}-${payAmt}`} taxpayer={drawerTp} year={selectedYear} initialAmount={payAmt} initialMethod={payMethod} onCancel={() => setShowPayModal(false)} onSuccess={() => { showSuccessToast(); setShowPayModal(false); setDrawerTp(null); setCandidates(prev => prev.filter(c => c.tp.id !== drawerTp.id)) }} />
+          <PaymentForm key={`${drawerTp.id}-${drawerTaxYear}-${payAmt}`} taxpayer={drawerTp} year={drawerTaxYear} initialAmount={payAmt} initialMethod={payMethod} onCancel={() => setShowPayModal(false)} onSuccess={() => { showSuccessToast(); setShowPayModal(false); setDrawerTp(null); setCandidates(prev => prev.filter(c => !(c.tp.id === drawerTp.id && c.taxYear === drawerTaxYear))) }} />
           {false && (saved ? (
             <div style={{ textAlign: 'center', padding: '28px 0' }}>
               <div style={{ fontSize: 44, marginBottom: 12 }}>✅</div>
@@ -803,7 +826,7 @@ export default function SearchPaymentPage() {
               {/* Summary */}
               <div style={{ padding: '14px 16px', background: 'rgba(240,236,251,0.5)', borderRadius: 12, marginBottom: 14, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, fontSize: 13 }}>
                 <div><div style={SLIM}>ผู้เสียภาษี</div><div style={{ fontWeight: 700, color: '#2d2545' }}>{getTaxpayerName(drawerTp!)}</div></div>
-                <div><div style={SLIM}>ปีภาษี</div><div style={{ fontWeight: 700, color: '#2d2545' }}>{selectedYear}</div></div>
+                <div><div style={SLIM}>ปีภาษี</div><div style={{ fontWeight: 700, color: '#2d2545' }}>{drawerTaxYear}</div></div>
                 <div style={{ gridColumn: '1/-1' }}><div style={SLIM}>ยอดที่ต้องชำระ</div><div style={{ fontSize: 18, fontWeight: 700, color: '#c0392b' }}>฿{formatCurrency(drawerRemaining)}</div></div>
               </div>
 

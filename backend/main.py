@@ -1129,6 +1129,125 @@ class CompleteTaxpayerCreate(TaxpayerCreate):
     sign_amount: float = 0
     added_by: int | None = None
 
+
+class HistoricalDebtCreate(BaseModel):
+    tax_year: int
+    land_amount: float = 0
+    sign_amount: float = 0
+    note: str | None = None
+
+
+@app.post("/api/taxpayers/{taxpayer_id}/historical-debts")
+def create_historical_debt(taxpayer_id: int, payload: HistoricalDebtCreate, request: Request):
+    """บันทึกยอดหนี้ยกมาโดยไม่ต้องมีทะเบียนประจำปีฉบับเต็ม"""
+    _require_group(request, _taxpayer_group(taxpayer_id))
+    current_tax_year = date.today().year + 543
+    if payload.tax_year < 2400 or payload.tax_year >= current_tax_year:
+        raise HTTPException(status_code=400, detail=f"ปีภาษีต้องเป็นปีก่อน {current_tax_year}")
+    if payload.land_amount < 0 or payload.sign_amount < 0:
+        raise HTTPException(status_code=400, detail="ยอดหนี้ต้องไม่ติดลบ")
+    if payload.land_amount <= 0 and payload.sign_amount <= 0:
+        raise HTTPException(status_code=400, detail="กรุณาระบุยอดหนี้อย่างน้อยหนึ่งประเภทภาษี")
+
+    note = (payload.note or "").strip()
+    legacy_note = "หนี้ยกมาจากข้อมูลเดิม" + (f" — {note}" if note else "")
+    try:
+        with db.transaction() as cursor:
+            cursor.execute(
+                """INSERT INTO public.taxpayer_year_records
+                   (taxpayer_id,tax_year,note,is_included,added_by)
+                   VALUES (%s,%s,%s,TRUE,%s)
+                   ON CONFLICT (taxpayer_id,tax_year) DO UPDATE SET
+                     is_included=TRUE,
+                     note=CASE
+                       WHEN taxpayer_year_records.note IS NULL OR taxpayer_year_records.note='' THEN EXCLUDED.note
+                       WHEN POSITION(EXCLUDED.note IN taxpayer_year_records.note)>0 THEN taxpayer_year_records.note
+                       ELSE taxpayer_year_records.note || E'\n' || EXCLUDED.note
+                     END
+                   RETURNING year_record_id""",
+                (taxpayer_id, payload.tax_year, legacy_note, _actor_id(request)),
+            )
+            year_record_id = cursor.fetchone()[0]
+            cursor.execute(
+                "SELECT tax_type FROM public.tax_assessments WHERE year_record_id=%s FOR UPDATE",
+                (year_record_id,),
+            )
+            existing_types = {row[0] for row in cursor.fetchall()}
+            requested = [
+                ("LAND_BUILDING", payload.land_amount),
+                ("SIGN", payload.sign_amount),
+            ]
+            conflicts = [tax_type for tax_type, amount in requested if amount > 0 and tax_type in existing_types]
+            if conflicts:
+                labels = ["ภาษีที่ดินและสิ่งปลูกสร้าง" if item == "LAND_BUILDING" else "ภาษีป้าย" for item in conflicts]
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"ปีภาษี {payload.tax_year} มีข้อมูล{' และ '.join(labels)}อยู่แล้ว กรุณาแก้ไขจากข้อมูลเดิม",
+                )
+            assessment_ids: dict[str, int] = {}
+            for tax_type, amount in requested:
+                if amount <= 0:
+                    continue
+                cursor.execute(
+                    """INSERT INTO public.tax_assessments
+                       (year_record_id,tax_type,assessed_amount,previous_amount,change_reason,created_by)
+                       VALUES (%s,%s,%s,0,%s,%s) RETURNING assessment_id""",
+                    (year_record_id, tax_type, amount, "บันทึกยอดหนี้ยกมาจากข้อมูลเดิม", _actor_id(request)),
+                )
+                assessment_ids[tax_type] = cursor.fetchone()[0]
+        return {
+            "success": True,
+            "message": "บันทึกยอดหนี้ยกมาเรียบร้อยแล้ว",
+            "data": {"year_record_id": year_record_id, "assessment_ids": assessment_ids},
+        }
+    except HTTPException:
+        raise
+    except Exception as error:
+        logger.exception("Historical debt creation failed")
+        raise HTTPException(status_code=500, detail={"message": "ไม่สามารถบันทึกยอดหนี้ยกมาได้", "error": str(error)})
+
+
+@app.get("/api/payment-match/cross-group")
+def get_cross_group_payment_matches(amount: float, tax_year: int, request: Request):
+    """แจ้งผลตรงยอดจากกลุ่มอื่นโดยไม่ให้เจ้าหน้าที่ดำเนินการข้ามกลุ่ม"""
+    actor = _actor(request)
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="ยอดเงินต้องมากกว่า 0")
+    own_group = actor.get("group") if actor.get("role") == "OFFICER" else None
+    tolerance = max(amount * 0.1, 5)
+    data, columns = db.fetch(
+        """WITH assessment_remaining AS (
+             SELECT t.taxpayer_id,t.owner_code,t.taxpayer_type,t.first_name,t.last_name,t.company_name,
+                    t.group_code,tyr.tax_year,ta.tax_type,ta.assessed_amount,
+                    GREATEST(ta.assessed_amount-COALESCE(SUM(pa.allocated_amount),0),0) AS remaining
+             FROM public.tax_assessments ta
+             JOIN public.taxpayer_year_records tyr ON tyr.year_record_id=ta.year_record_id
+             JOIN public.taxpayers t ON t.taxpayer_id=tyr.taxpayer_id
+             LEFT JOIN public.payment_allocations pa ON pa.assessment_id=ta.assessment_id
+             WHERE tyr.is_included=TRUE AND t.is_active=TRUE
+               AND (%s::text IS NULL OR t.group_code<>%s::text)
+             GROUP BY t.taxpayer_id,t.owner_code,t.taxpayer_type,t.first_name,t.last_name,t.company_name,
+                      t.group_code,tyr.tax_year,ta.tax_type,ta.assessed_amount
+           ), candidates AS (
+             SELECT *,tax_type AS match_type,remaining AS match_amount FROM assessment_remaining WHERE remaining>0
+             UNION ALL
+             SELECT taxpayer_id,MAX(owner_code),MAX(taxpayer_type),MAX(first_name),MAX(last_name),MAX(company_name),
+                    group_code,tax_year,'BOTH',SUM(assessed_amount),SUM(remaining),'BOTH',SUM(remaining)
+             FROM assessment_remaining
+             GROUP BY taxpayer_id,group_code,tax_year
+             HAVING COUNT(*) FILTER (WHERE remaining>0)>1 AND SUM(remaining)>0
+           )
+           SELECT taxpayer_id,owner_code,taxpayer_type,first_name,last_name,company_name,group_code,
+                  tax_year,match_type,match_amount,(match_amount-%s) AS difference
+           FROM candidates
+           WHERE ABS(match_amount-%s)<=%s
+           ORDER BY ABS(match_amount-%s),tax_year DESC,taxpayer_id
+           LIMIT 20""",
+        (own_group, own_group, amount, amount, tolerance, amount),
+    )
+    matches = [dict(zip(columns, row)) for row in data]
+    return {"success": True, "count": len(matches), "data": jsonable_encoder(matches)}
+
 @app.post("/api/taxpayers/complete")
 def create_complete_taxpayer(request: CompleteTaxpayerCreate, http_request: Request):
     """สร้าง master, year record และ assessments ใน transaction เดียว"""

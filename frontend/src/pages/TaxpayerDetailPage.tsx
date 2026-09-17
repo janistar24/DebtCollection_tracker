@@ -15,6 +15,7 @@ import { createCompletePayment } from '../api/payments'
 import { createFollowUpLog } from '../api/follow_up_logs'
 import PaymentForm from '../components/PaymentForm'
 import BuddhistDateInput from '../components/BuddhistDateInput'
+import { createHistoricalDebt } from '../api/debt_management'
 
 // Extract short keyword tags from a freeform note string
 function extractTags(tp: Taxpayer): { label: string; year: number; note: string }[] {
@@ -159,6 +160,12 @@ export default function TaxpayerDetailPage() {
   const tp = taxpayers.find(t => t.id === id)
   const [showFollowModal, setShowFollowModal] = useState(false)
   const [showPayModal, setShowPayModal] = useState(false)
+  const [showHistoricalDebtModal, setShowHistoricalDebtModal] = useState(false)
+  const [historicalYear, setHistoricalYear] = useState(String(CURRENT_YEAR - 1))
+  const [historicalLand, setHistoricalLand] = useState('')
+  const [historicalSign, setHistoricalSign] = useState('')
+  const [historicalNote, setHistoricalNote] = useState('')
+  const [historicalSaving, setHistoricalSaving] = useState(false)
 
   // Follow-up form
   const [fuType, setFuType] = useState<FollowUp['type']>('phone')
@@ -211,6 +218,15 @@ export default function TaxpayerDetailPage() {
   const signPaid = getSignPaid(tp, selectedYear)
   const landRem = getLandRemaining(tp, selectedYear)
   const signRem = getSignRemaining(tp, selectedYear)
+  const historicalOutstanding = tp.assessments
+    .filter(item => item.year < CURRENT_YEAR)
+    .map(item => ({
+      assessment: item,
+      landRemaining: getLandRemaining(tp, item.year),
+      signRemaining: getSignRemaining(tp, item.year),
+    }))
+    .filter(item => item.landRemaining + item.signRemaining > 0)
+    .sort((a, b) => b.assessment.year - a.assessment.year)
 
   // Build timeline
   const timeline: { date: string; icon: string; title: string; detail?: string; amount?: number }[] = [
@@ -302,6 +318,36 @@ export default function TaxpayerDetailPage() {
       alert(error instanceof Error ? error.message : 'บันทึกการชำระไม่สำเร็จ')
     } finally {
       setPaySaving(false)
+    }
+  }
+
+  const handleSaveHistoricalDebt = async () => {
+    const taxYear = Number(historicalYear)
+    const landAmount = Number(historicalLand) || 0
+    const signAmount = Number(historicalSign) || 0
+    if (!Number.isInteger(taxYear) || taxYear < 2400 || taxYear >= CURRENT_YEAR) {
+      return alert(`กรุณาระบุปีภาษีก่อนปี ${CURRENT_YEAR}`)
+    }
+    if (landAmount <= 0 && signAmount <= 0) return alert('กรุณาระบุยอดหนี้อย่างน้อยหนึ่งประเภทภาษี')
+    try {
+      setHistoricalSaving(true)
+      await createHistoricalDebt(Number(tp.id), {
+        tax_year: taxYear,
+        land_amount: landAmount,
+        sign_amount: signAmount,
+        note: historicalNote.trim() || null,
+      })
+      await refreshData()
+      setShowHistoricalDebtModal(false)
+      setHistoricalYear(String(CURRENT_YEAR - 1))
+      setHistoricalLand('')
+      setHistoricalSign('')
+      setHistoricalNote('')
+      alert('บันทึกยอดหนี้ยกมาเรียบร้อยแล้ว')
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'บันทึกยอดหนี้ยกมาไม่สำเร็จ')
+    } finally {
+      setHistoricalSaving(false)
     }
   }
 
@@ -445,6 +491,18 @@ export default function TaxpayerDetailPage() {
             ))}
           </div>
 
+          {historicalOutstanding.length > 0 && <div className="glass-card" style={{ padding: '18px 20px', marginBottom: 20 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+              <div><div style={{ fontSize: 14, fontWeight: 700, color: '#2d2545' }}>ยอดหนี้ค้างจากปีก่อน</div><div style={{ fontSize: 11, color: '#a89cc8', marginTop: 2 }}>ยอดยกมาที่ใช้ติดตามและตัดชำระร่วมกับปีปัจจุบัน</div></div>
+              <b style={{ color: '#c0392b', fontSize: 15 }}>฿{formatCurrency(historicalOutstanding.reduce((sum, item) => sum + item.landRemaining + item.signRemaining, 0))}</b>
+            </div>
+            {historicalOutstanding.map(item => <div key={item.assessment.year} style={{ display: 'grid', gridTemplateColumns: '70px 1fr auto', gap: 10, alignItems: 'center', padding: '9px 10px', borderTop: '1px solid rgba(200,190,240,.2)' }}>
+              <b style={{ fontSize: 12, color: '#5d468e' }}>ปี {item.assessment.year}</b>
+              <span style={{ fontSize: 12, color: '#7e719c' }}>{[item.landRemaining > 0 ? `ภาษีที่ดินฯ ฿${formatCurrency(item.landRemaining)}` : '', item.signRemaining > 0 ? `ภาษีป้าย ฿${formatCurrency(item.signRemaining)}` : ''].filter(Boolean).join(' · ')}</span>
+              <b style={{ fontSize: 12, color: '#c0392b' }}>฿{formatCurrency(item.landRemaining + item.signRemaining)}</b>
+            </div>)}
+          </div>}
+
           {/* Timeline */}
           <div className="glass-card" style={{ padding: '20px 24px' }}>
             <h3 style={{ margin: '0 0 20px', fontSize: 15, fontWeight: 700, color: '#2d2545' }}>📜 ประวัติการดำเนินการ</h3>
@@ -484,6 +542,9 @@ export default function TaxpayerDetailPage() {
               <button className="btn-secondary" style={{ width: '100%' }} onClick={() => setShowPayModal(true)}>
                 💰 บันทึกการชำระ
               </button>
+              <button className="btn-secondary" style={{ width: '100%' }} onClick={() => setShowHistoricalDebtModal(true)}>
+                📚 เพิ่มยอดหนี้ยกมาจากปีก่อน
+              </button>
             </div>
           </div>}
 
@@ -501,6 +562,20 @@ export default function TaxpayerDetailPage() {
           </div>
         </div>
       </div>
+
+      {canWrite && showHistoricalDebtModal && <Modal title="เพิ่มยอดหนี้ยกมาจากปีก่อน" onClose={() => !historicalSaving && setShowHistoricalDebtModal(false)} maxWidth="560px">
+        <div style={{ padding: '11px 13px', borderRadius: 10, background: '#fff8e6', color: '#795716', fontSize: 12.5, lineHeight: 1.6, marginBottom: 16 }}>
+          ใช้กรณีมีหลักฐานยอดค้างจากปีก่อน แต่ไม่มีทะเบียนหรือรายละเอียดรายการของปีนั้นครบถ้วน ยอดนี้จะถูกรวมในการติดตามและสามารถตัดชำระเป็นงวดได้
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+          <div><label style={LBL}>ปีภาษี (พ.ศ.) *</label><input className="input-field" type="number" min="2400" max={CURRENT_YEAR - 1} value={historicalYear} onChange={e => setHistoricalYear(e.target.value)} /></div>
+          <div />
+          <div><label style={LBL}>ยอดค้างภาษีที่ดินและสิ่งปลูกสร้าง</label><input className="input-field" type="number" min="0" step="0.01" placeholder="0.00" value={historicalLand} onChange={e => setHistoricalLand(e.target.value)} /></div>
+          <div><label style={LBL}>ยอดค้างภาษีป้าย</label><input className="input-field" type="number" min="0" step="0.01" placeholder="0.00" value={historicalSign} onChange={e => setHistoricalSign(e.target.value)} /></div>
+          <div style={{ gridColumn: '1/-1' }}><label style={LBL}>หมายเหตุหรือแหล่งที่มาของยอด</label><textarea className="input-field" rows={3} placeholder="เช่น ยอดยกมาจากทะเบียนเดิม เลขที่เอกสาร..." value={historicalNote} onChange={e => setHistoricalNote(e.target.value)} /></div>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 9, marginTop: 20 }}><button className="btn-secondary" disabled={historicalSaving} onClick={() => setShowHistoricalDebtModal(false)}>ยกเลิก</button><button className="btn-primary" disabled={historicalSaving || (!Number(historicalLand) && !Number(historicalSign))} onClick={() => void handleSaveHistoricalDebt()}>{historicalSaving ? 'กำลังบันทึก...' : 'บันทึกยอดหนี้ยกมา'}</button></div>
+      </Modal>}
 
       {/* Follow-up Modal */}
       {canWrite && editing && <Modal title="แก้ไขข้อมูลผู้เสียภาษี" onClose={() => setEditing(null)} maxWidth="680px">
