@@ -26,11 +26,16 @@ export default function AcceptInvitePage() {
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
+    const cleanUsername = username.trim()
+    if (!cleanUsername) return setError('กรุณากรอกชื่อผู้ใช้งาน')
+    if (!/^[A-Za-z0-9._-]{3,64}$/.test(cleanUsername)) return setError('ชื่อผู้ใช้งานต้องเป็นอักษรอังกฤษ ตัวเลข จุด ขีดกลาง หรือขีดล่าง จำนวน 3–64 ตัวอักษร')
+    if (password.length < 12) return setError(`รหัสผ่านต้องมีอย่างน้อย 12 ตัวอักษร (ขาดอีก ${12 - password.length} ตัว)`)
+    if (!confirmPassword) return setError('กรุณากรอกยืนยันรหัสผ่าน')
     if (password !== confirmPassword) return setError('รหัสผ่านที่ยืนยันไม่ตรงกัน')
     setBusy(true)
     setError('')
     try {
-      await acceptInvitation(token, username.trim(), password)
+      await acceptInvitation(token, cleanUsername, password)
       setSubmitted(true)
     } catch (e) { setError(e instanceof Error ? e.message : 'ไม่สามารถตั้งค่าบัญชีได้') }
     finally { setBusy(false) }
@@ -44,12 +49,12 @@ export default function AcceptInvitePage() {
         <div style={{ background: '#f5f1ff', padding: 13, borderRadius: 11, marginBottom: 20, color: '#594484' }}>
           <strong>{details.name}</strong><br />{details.email}
         </div>
-        <form onSubmit={submit} style={{ display: 'grid', gap: 15 }}>
-          <label>ชื่อผู้ใช้งาน<input className="input-field" autoComplete="username" required minLength={3} maxLength={64} value={username} onChange={e => setUsername(e.target.value)} placeholder="อักษรอังกฤษหรือตัวเลข" /></label>
-          <label>รหัสผ่าน<input className="input-field" type="password" autoComplete="new-password" required minLength={12} value={password} onChange={e => setPassword(e.target.value)} placeholder="อย่างน้อย 12 ตัวอักษร" /></label>
-          <label>ยืนยันรหัสผ่าน<input className="input-field" type="password" autoComplete="new-password" required value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} /></label>
+        <form noValidate onSubmit={submit} style={{ display: 'grid', gap: 15 }}>
+          <label>ชื่อผู้ใช้งาน<input className="input-field" autoComplete="username" maxLength={64} value={username} onChange={e => { setUsername(e.target.value); setError('') }} placeholder="อักษรอังกฤษหรือตัวเลข 3–64 ตัว" /><span style={{ display: 'block', color: '#9b8daf', fontSize: 11, marginTop: 4 }}>ใช้ตัวอักษรอังกฤษ ตัวเลข จุด ขีดกลาง หรือขีดล่าง</span></label>
+          <label>รหัสผ่าน<input className="input-field" type="password" autoComplete="new-password" value={password} onChange={e => { setPassword(e.target.value); setError('') }} placeholder="อย่างน้อย 12 ตัวอักษร" /><span style={{ display: 'block', color: password.length > 0 && password.length < 12 ? '#9b6b00' : '#9b8daf', fontSize: 11, marginTop: 4 }}>{password.length < 12 ? `กรอกแล้ว ${password.length}/12 ตัวอักษร` : 'รหัสผ่านมีความยาวครบตามกำหนด'}</span></label>
+          <label>ยืนยันรหัสผ่าน<input className="input-field" type="password" autoComplete="new-password" value={confirmPassword} onChange={e => { setConfirmPassword(e.target.value); setError('') }} />{confirmPassword && <span style={{ display: 'block', color: password === confirmPassword ? '#168653' : '#b42318', fontSize: 11, marginTop: 4 }}>{password === confirmPassword ? 'รหัสผ่านตรงกัน' : 'รหัสผ่านยังไม่ตรงกัน'}</span>}</label>
           {error && <div role="alert" style={{ color: '#b42318', fontSize: 13 }}>{error}</div>}
-          <button className="btn-primary" disabled={busy || password.length < 12}>{busy ? 'กำลังบันทึก...' : 'ตั้งค่าบัญชี'}</button>
+          <button type="submit" className="btn-primary" disabled={busy}>{busy ? 'กำลังบันทึก...' : 'ตั้งค่าบัญชี'}</button>
         </form>
       </> : <><div role="alert" style={{ color: '#b42318', marginBottom: 18 }}>{error}</div><Link to="/login">กลับหน้าเข้าสู่ระบบ</Link></>}
     </div>
