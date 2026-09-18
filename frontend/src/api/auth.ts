@@ -15,6 +15,13 @@ interface LoginResponse {
   }
 }
 
+// เก็บ Session เฉพาะหน่วยความจำของแท็บปัจจุบันเท่านั้น
+// การเปิดแท็บใหม่ ทำสำเนาแท็บ หรือรีเฟรชหน้าจะต้องเข้าสู่ระบบใหม่
+let accessToken: string | null = null
+let signedInUser: User | null = null
+localStorage.removeItem('tax_access_token')
+localStorage.removeItem('tax_current_user')
+
 export async function login(
   username: string,
   password: string
@@ -49,7 +56,7 @@ export async function login(
     }
 
     if (response.status === 403) {
-      throw new Error('บัญชีผู้ใช้งานถูกปิดใช้งาน')
+      throw new Error(serverDetail || 'บัญชีผู้ใช้งานถูกปิดใช้งาน')
     }
 
     if (response.status === 429) {
@@ -69,21 +76,18 @@ export async function login(
     group: result.user.group ?? undefined,
     active: result.user.active,
   }
-  localStorage.setItem('tax_access_token', result.access_token)
-  localStorage.setItem('tax_current_user', JSON.stringify(user))
+  accessToken = result.access_token
+  signedInUser = user
   return user
 }
 
 export function getStoredUser(): User | null {
-  try {
-    const value = localStorage.getItem('tax_current_user')
-    return value ? JSON.parse(value) as User : null
-  } catch {
-    return null
-  }
+  return signedInUser
 }
 
 export function clearAuthSession() {
+  accessToken = null
+  signedInUser = null
   localStorage.removeItem('tax_access_token')
   localStorage.removeItem('tax_current_user')
 }
@@ -93,7 +97,7 @@ export function installAuthenticatedFetch() {
   window.fetch = async (input: RequestInfo | URL, init: RequestInit = {}) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
     const publicRequest = url.endsWith('/api/login') || url.includes('/api/user-invitations/')
-    const token = localStorage.getItem('tax_access_token')
+    const token = accessToken
     const headers = new Headers(init.headers ?? (input instanceof Request ? input.headers : undefined))
     if (token && url.includes('/api/') && !publicRequest) {
       headers.set('Authorization', `Bearer ${token}`)

@@ -11,7 +11,7 @@ const ROLES = { officer: 'เจ้าหน้าที่ผู้รับผ
 const EMPTY = { name: '', username: '', email: '', password: '', role: 'officer', group: 'ก-น', active: true }
 
 export default function AdminUsersPage() {
-  const { currentUser, users, addUser, updateUser, removeUser } = useApp()
+  const { currentUser, users, addUser, updateUser, removeUser, refreshData, dataLoading } = useApp()
   const [showForm, setShowForm] = useState(false)
   const [editUser, setEditUser] = useState<User | null>(null)
   const [form, setForm] = useState(EMPTY)
@@ -94,11 +94,20 @@ export default function AdminUsersPage() {
     catch (e) { notify('error', e instanceof Error ? e.message : 'ไม่สามารถลบบัญชีผู้ใช้งานได้') }
     finally { setBusy(false) }
   }
+  const refreshUsers = async () => {
+    try {
+      setNotice(null)
+      await refreshData()
+      notify('success', 'ปรับปรุงรายชื่อผู้ใช้งานล่าสุดแล้ว')
+    } catch (error) {
+      notify('error', error instanceof Error ? error.message : 'ไม่สามารถรีเฟรชรายชื่อผู้ใช้งานได้')
+    }
+  }
 
   return <div className="app-fluid-page" style={{ paddingBottom: 36 }}>
     <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 18, marginBottom: 20, flexWrap: 'wrap' }}>
       <div><h2 style={{ margin: '0 0 4px', fontSize: 21 }}>จัดการผู้ใช้งาน</h2><p style={SUB}>สร้างบัญชี กำหนดสิทธิ์ และควบคุมกลุ่มข้อมูลที่ผู้ใช้งานรับผิดชอบ</p></div>
-      <button type="button" className="btn-primary" onClick={openAdd}>＋ เพิ่มผู้ใช้งาน</button>
+      <div style={{ display: 'flex', gap: 9 }}><button type="button" className="btn-secondary" disabled={dataLoading} onClick={() => void refreshUsers()}>{dataLoading ? 'กำลังรีเฟรช...' : '↻ รีเฟรชรายชื่อ'}</button><button type="button" className="btn-primary" onClick={openAdd}>＋ เพิ่มผู้ใช้งาน</button></div>
     </div>
     {notice && <div role="alert" style={{ marginBottom: 14, padding: '11px 14px', borderRadius: 11, fontSize: 13.5, background: notice.type === 'success' ? '#ecf9f2' : '#fff1f0', border: `1px solid ${notice.type === 'success' ? '#b9e7ce' : '#f2c1bd'}`, color: notice.type === 'success' ? '#18794e' : '#b42318' }}>{notice.type === 'success' ? '✓' : '⚠'} {notice.text}</div>}
 
@@ -114,11 +123,11 @@ export default function AdminUsersPage() {
             <td style={TD}><span style={{ fontFamily: 'monospace', letterSpacing: 2, color: '#7b728e' }}>••••••••</span></td>
             <td style={TD}><StatusBadge status={u.role} size="sm" /></td>
             <td style={{ ...TD, color: '#6b5b95' }}>{u.role === 'officer' ? `กลุ่ม ${u.group ?? 'ยังไม่กำหนด'}` : 'ทุกกลุ่ม'}</td>
-            <td style={TD}><StatusBadge status={u.active ? 'active' : 'inactive'} size="sm" /></td>
+            <td style={TD}><StatusBadge status={u.pendingApproval ? 'pending_approval' : u.active ? 'active' : 'inactive'} size="sm" /></td>
             <td style={TD}><div style={{ display: 'flex', gap: 3, whiteSpace: 'nowrap' }}>
               <button type="button" style={ACTION} onClick={() => openEdit(u)}>แก้ไข</button>
               <button type="button" style={ACTION} onClick={() => { setResetTarget(u); setNewPassword('') }}>รีเซ็ตรหัสผ่าน</button>
-              <button type="button" style={{ ...ACTION, color: u.active ? '#a55b16' : '#168653' }} disabled={self} title={self ? 'ไม่สามารถปิดบัญชีที่กำลังใช้งานอยู่' : ''} onClick={() => setActiveTarget(u)}>{u.active ? 'ปิดการใช้งาน' : 'เปิดใช้งาน'}</button>
+              <button type="button" style={{ ...ACTION, color: u.active ? '#a55b16' : '#168653', fontWeight: u.pendingApproval ? 700 : 400 }} disabled={self} title={self ? 'ไม่สามารถปิดบัญชีที่กำลังใช้งานอยู่' : ''} onClick={() => setActiveTarget(u)}>{u.active ? 'ปิดการใช้งาน' : u.pendingApproval ? 'อนุมัติการใช้งาน' : 'เปิดใช้งาน'}</button>
               <button type="button" style={{ ...ACTION, color: '#c0392b' }} disabled={self} title={self ? 'ไม่สามารถลบบัญชีที่กำลังใช้งานอยู่' : ''} onClick={() => setDeleteTarget(u)}>ลบบัญชี</button>
             </div></td>
           </tr>

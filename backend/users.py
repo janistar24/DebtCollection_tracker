@@ -23,7 +23,17 @@ class Users:
                 u.is_active,
                 u.created_at,
                 u.updated_at,
-                ra.group_code
+                COALESCE(ra.group_code, (
+                    SELECT pending_ra.group_code FROM public.responsibility_assignments pending_ra
+                    WHERE pending_ra.user_id=u.user_id
+                    ORDER BY pending_ra.is_active DESC,pending_ra.start_date DESC LIMIT 1
+                )) AS group_code
+                ,EXISTS (
+                    SELECT 1 FROM public.user_invitations ui
+                    WHERE ui.created_user_id = u.user_id
+                      AND ui.accepted_at IS NOT NULL
+                      AND u.is_active = FALSE
+                ) AS pending_approval
 
             FROM public.users u
 
@@ -75,7 +85,17 @@ class Users:
                 u.is_active,
                 u.created_at,
                 u.updated_at,
-                ra.group_code
+                COALESCE(ra.group_code, (
+                    SELECT pending_ra.group_code FROM public.responsibility_assignments pending_ra
+                    WHERE pending_ra.user_id=u.user_id
+                    ORDER BY pending_ra.is_active DESC,pending_ra.start_date DESC LIMIT 1
+                )) AS group_code
+                ,EXISTS (
+                    SELECT 1 FROM public.user_invitations ui
+                    WHERE ui.created_user_id = u.user_id
+                      AND ui.accepted_at IS NOT NULL
+                      AND u.is_active = FALSE
+                ) AS pending_approval
 
             FROM public.users u
 
@@ -111,7 +131,15 @@ class Users:
                 u.password_hash,
                 u.email,
                 u.is_active,
-                ra.group_code
+                COALESCE(ra.group_code, (
+                    SELECT pending_ra.group_code FROM public.responsibility_assignments pending_ra
+                    WHERE pending_ra.user_id=u.user_id
+                    ORDER BY pending_ra.is_active DESC,pending_ra.start_date DESC LIMIT 1
+                )) AS group_code,
+                EXISTS (
+                    SELECT 1 FROM public.user_invitations ui
+                    WHERE ui.created_user_id=u.user_id AND ui.accepted_at IS NOT NULL
+                ) AS created_from_invitation
 
             FROM public.users u
 

@@ -15,6 +15,7 @@ const STATUS_MAP: Record<string, { label: string; bg: string; color: string; dot
   closed:     { label: 'ปิดแล้ว',      bg: '#e8fdf4', color: '#1a8f5a', dot: '#1a8f5a' },
   active:     { label: 'ใช้งาน',       bg: '#e8fdf4', color: '#1a8f5a', dot: '#1a8f5a' },
   inactive:   { label: 'ปิดการใช้งาน',bg: '#f4f4f8', color: '#888', dot: '#aaa' },
+  pending_approval: { label: 'รออนุมัติ', bg: '#fff8e6', color: '#9b6b00', dot: '#e6a800' },
   officer:    { label: 'พนักงาน',      bg: '#e8eef8', color: '#3a5fbf', dot: '#3a5fbf' },
   director:   { label: 'ผู้บริหาร',    bg: '#f0ecfb', color: '#7c5cbf', dot: '#9b7dd4' },
   admin:      { label: 'ผู้ดูแลระบบ',   bg: '#fff1f0', color: '#c0392b', dot: '#e74c3c' },

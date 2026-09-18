@@ -13,6 +13,7 @@ interface UserApi {
   created_at: string
   updated_at: string
   group_code: Group | null
+  pending_approval?: boolean
 }
 
 interface UsersResponse {
@@ -45,6 +46,7 @@ export async function getUsers(): Promise<User[]> {
     active: user.is_active,
     username: user.username,
     email: user.email ?? undefined,
+    pendingApproval: Boolean(user.pending_approval),
   }))
 }
 

@@ -528,20 +528,20 @@ def accept_user_invitation(payload: AcceptUserInvitation):
         cursor.execute(
             """INSERT INTO public.users
                (employee_code,first_name,last_name,role,username,email,password_hash,is_active)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,TRUE) RETURNING user_id""",
+               VALUES (%s,%s,%s,%s,%s,%s,%s,FALSE) RETURNING user_id""",
             (invitation["employee_code"], invitation["first_name"], invitation["last_name"],
              invitation["role"], username, invitation["email"], password_hash.hash(payload.password)),
         )
         user_id = cursor.fetchone()[0]
-        _save_user_assignment(cursor, user_id, invitation["role"], invitation["group_code"])
+        _save_user_assignment(cursor, user_id, invitation["role"], invitation["group_code"], False)
         cursor.execute(
             """UPDATE public.user_invitations
                SET accepted_at=CURRENT_TIMESTAMP,created_user_id=%s WHERE invitation_id=%s""",
             (user_id, invitation["invitation_id"]),
         )
-    return {"success": True}
+    return {"success": True, "message": "ตั้งค่าบัญชีเรียบร้อยแล้ว กรุณารอผู้ดูแลระบบอนุมัติการใช้งาน"}
 
-def _save_user_assignment(cursor, user_id: int, role: str, group_code: str | None):
+def _save_user_assignment(cursor, user_id: int, role: str, group_code: str | None, assignment_active: bool = True):
     cursor.execute(
         """UPDATE public.responsibility_assignments
            SET is_active=FALSE,end_date=CURRENT_DATE
@@ -549,6 +549,14 @@ def _save_user_assignment(cursor, user_id: int, role: str, group_code: str | Non
         (user_id,),
     )
     if role == "OFFICER" and group_code:
+        if not assignment_active:
+            cursor.execute(
+                """INSERT INTO public.responsibility_assignments
+                   (user_id,group_code,start_date,end_date,is_active)
+                   VALUES (%s,%s,CURRENT_DATE,NULL,FALSE)""",
+                (user_id, group_code),
+            )
+            return
         cursor.execute(
             """SELECT user_id FROM public.responsibility_assignments
                WHERE group_code=%s AND is_active=TRUE AND user_id<>%s""",
@@ -602,7 +610,7 @@ def create_admin_user(payload: AdminUserCreate, http_request: Request):
                  role, username, email, password_hash.hash(payload.password), payload.is_active),
             )
             user_id = cursor.fetchone()[0]
-            _save_user_assignment(cursor, user_id, role, payload.group_code)
+            _save_user_assignment(cursor, user_id, role, payload.group_code, payload.is_active)
         return {"success": True, "data": {"user_id": user_id, "employee_code": employee_code}}
     except HTTPException:
         raise
@@ -656,7 +664,7 @@ def update_admin_user(user_id: int, payload: AdminUserUpdate, http_request: Requ
                        WHERE user_id=%s""",
                     (first_name, last_name, role, username, email, payload.is_active, user_id),
                 )
-            _save_user_assignment(cursor, user_id, role, payload.group_code)
+            _save_user_assignment(cursor, user_id, role, payload.group_code, payload.is_active)
         return {"success": True}
     except HTTPException:
         raise
@@ -672,11 +680,30 @@ def set_admin_user_active(user_id: int, is_active: bool, http_request: Request):
     try:
         with db.transaction() as cursor:
             cursor.execute(
+                """SELECT u.role,
+                          (SELECT ra.group_code FROM public.responsibility_assignments ra
+                           WHERE ra.user_id=u.user_id
+                           ORDER BY ra.is_active DESC,ra.start_date DESC LIMIT 1)
+                   FROM public.users u WHERE u.user_id=%s FOR UPDATE""",
+                (user_id,),
+            )
+            account = cursor.fetchone()
+            if account is None:
+                raise HTTPException(status_code=404, detail="ไม่พบผู้ใช้งาน")
+            cursor.execute(
                 "UPDATE public.users SET is_active=%s,updated_at=CURRENT_TIMESTAMP WHERE user_id=%s RETURNING user_id",
                 (is_active, user_id),
             )
-            if cursor.fetchone() is None:
-                raise HTTPException(status_code=404, detail="ไม่พบผู้ใช้งาน")
+            cursor.fetchone()
+            if is_active:
+                _save_user_assignment(cursor, user_id, account[0], account[1], True)
+            else:
+                cursor.execute(
+                    """UPDATE public.responsibility_assignments
+                       SET is_active=FALSE,end_date=CURRENT_DATE
+                       WHERE user_id=%s AND is_active=TRUE""",
+                    (user_id,),
+                )
         return {"success": True}
     except HTTPException:
         raise
@@ -1144,7 +1171,11 @@ def login(request: LoginRequest, http_request: Request):
     if not user["is_active"]:
         raise HTTPException(
             status_code=403,
-            detail="บัญชีผู้ใช้งานถูกปิดใช้งาน"
+            detail=(
+                "บัญชีอยู่ระหว่างรอผู้ดูแลระบบอนุมัติการใช้งาน"
+                if user.get("created_from_invitation")
+                else "บัญชีผู้ใช้งานถูกปิดใช้งาน"
+            )
         )
 
     try:

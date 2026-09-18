@@ -9,6 +9,7 @@ export interface User {
   active: boolean
   username?: string
   email?: string
+  pendingApproval?: boolean
 }
 
 export type TaxType = 'land' | 'sign' | 'both'

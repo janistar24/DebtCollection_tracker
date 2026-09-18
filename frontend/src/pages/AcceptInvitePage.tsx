@@ -13,6 +13,7 @@ export default function AcceptInvitePage() {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [submitted, setSubmitted] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -30,7 +31,7 @@ export default function AcceptInvitePage() {
     setError('')
     try {
       await acceptInvitation(token, username.trim(), password)
-      navigate('/login', { replace: true })
+      setSubmitted(true)
     } catch (e) { setError(e instanceof Error ? e.message : 'ไม่สามารถตั้งค่าบัญชีได้') }
     finally { setBusy(false) }
   }
@@ -39,7 +40,7 @@ export default function AcceptInvitePage() {
     <div className="glass-card" style={{ width: '100%', maxWidth: 460, padding: '32px 36px' }}>
       <h1 style={{ margin: '0 0 5px', fontSize: 23, color: '#302747' }}>ตั้งค่าบัญชีผู้ใช้งาน</h1>
       <p style={{ color: '#8f82b1', margin: '0 0 22px', fontSize: 13 }}>ระบบบริหารภาษี เทศบาลเมืองตาคลี</p>
-      {loading ? <p>กำลังตรวจสอบคำเชิญ...</p> : details ? <>
+      {submitted ? <div style={{ textAlign: 'center', padding: '12px 0' }}><div style={{ fontSize: 38 }}>✅</div><h2 style={{ fontSize: 18, margin: '10px 0 6px' }}>ส่งคำขอใช้งานเรียบร้อยแล้ว</h2><p style={{ color: '#7e719c', fontSize: 13, lineHeight: 1.7 }}>กรุณารอผู้ดูแลระบบอนุมัติบัญชี แล้วจึงเข้าสู่ระบบด้วยชื่อผู้ใช้งานและรหัสผ่านที่กำหนดไว้</p><button type="button" className="btn-primary" onClick={() => navigate('/login', { replace: true })}>กลับหน้าเข้าสู่ระบบ</button></div> : loading ? <p>กำลังตรวจสอบคำเชิญ...</p> : details ? <>
         <div style={{ background: '#f5f1ff', padding: 13, borderRadius: 11, marginBottom: 20, color: '#594484' }}>
           <strong>{details.name}</strong><br />{details.email}
         </div>
