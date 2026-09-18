@@ -32,6 +32,16 @@ const PAYMENT_FILTER_LABELS = [
   { key: 'unpaid', label: 'ยังไม่ชำระ' },
 ] as const
 
+const CONTACT_RESULT_LABELS: Record<string, string> = {
+  no_answer: 'ไม่รับสาย',
+  reached: 'ติดต่อสำเร็จ',
+  callback: 'ให้ติดต่อกลับ',
+  promised: 'นัดชำระ',
+  dispute: 'มีข้อโต้แย้ง',
+  wrong_number: 'หมายเลขไม่ถูกต้อง',
+  other: 'อื่น ๆ',
+}
+
 type FollowFilterKey = typeof FOLLOW_FILTER_LABELS[number]['key']
 type PaymentFilterKey = typeof PAYMENT_FILTER_LABELS[number]['key']
 
@@ -348,6 +358,8 @@ function CallLogModal({ onClose, onSave }: { onClose: () => void; onSave: (fu: O
   const landRemaining = selectedOutstanding.reduce((sum, item) => sum + item.landRemaining, 0)
   const signRemaining = selectedOutstanding.reduce((sum, item) => sum + item.signRemaining, 0)
   const totalSelectedOutstanding = landRemaining + signRemaining
+  const selectedCurrentAssessed = selected ? getTotalAssessed(selected, selectedYear) : 0
+  const selectedPriorOutstanding = selectedOutstanding.reduce((sum, item) => sum + (item.assessment.year < selectedYear ? item.landRemaining + item.signRemaining : 0), 0)
   const selectedHistory = selected
     ? [...yearFollowUps(selected)].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 4)
     : []
@@ -487,6 +499,9 @@ function CallLogModal({ onClose, onSave }: { onClose: () => void; onSave: (fu: O
                         <small style={{ display: 'block', color: '#9487b4', marginTop: 3, fontSize: 11 }}>
                           {tp.ownerCode} · {tp.phone || '-'}
                         </small>
+                        <small style={{ display: 'block', color: '#c0392b', marginTop: 3, fontSize: 10.5, fontWeight: 600 }}>
+                          ยอดค้างสะสม ฿{formatCurrency(getOutstandingYears(tp, selectedYear).reduce((sum, item) => sum + item.landRemaining + item.signRemaining, 0))}
+                        </small>
                       </span>
                       <span style={{
                         height: 'fit-content', borderRadius: 99, padding: '4px 7px',
@@ -541,6 +556,26 @@ function CallLogModal({ onClose, onSave }: { onClose: () => void; onSave: (fu: O
                       <div style={{ fontSize: 18, fontWeight: 700, color: '#c0392b' }}>฿{formatCurrency(totalSelectedOutstanding)}</div>
                       <div style={{ fontSize: 10, color: '#a89cc8', marginTop: 2 }}>รวมทุกปีภาษี</div>
                     </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 8, marginTop: 12 }}>
+                    {[
+                      ['ยอดประเมินปีปัจจุบัน', selectedCurrentAssessed, '#2d2545'],
+                      ['หนี้ค้างจากปีก่อน', selectedPriorOutstanding, '#9a6800'],
+                      ['ยอดค้างชำระสะสม', totalSelectedOutstanding, '#c0392b'],
+                    ].map(([label, value, color]) => <div key={String(label)} style={{ padding: '9px 10px', borderRadius: 10, background: '#faf9fd', border: '1px solid rgba(180,165,230,.24)', minWidth: 0 }}>
+                      <div style={{ fontSize: 10.5, color: '#9487b4', whiteSpace: 'nowrap' }}>{label}</div>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: String(color), marginTop: 3, whiteSpace: 'nowrap' }}>฿{formatCurrency(Number(value))}</div>
+                    </div>)}
+                  </div>
+
+                  <div style={{ marginTop: 11, padding: '10px 11px', borderRadius: 10, background: 'rgba(240,236,251,.42)' }}>
+                    <div style={{ fontSize: 11.5, fontWeight: 700, color: '#5f4596', marginBottom: 6 }}>รายละเอียดหนี้ค้างแยกตามปีภาษี</div>
+                    {selectedOutstanding.map(item => <div key={item.assessment.year} style={{ display: 'grid', gridTemplateColumns: '62px 1fr auto', gap: 8, alignItems: 'center', padding: '5px 0', borderTop: '1px solid rgba(180,165,230,.18)', fontSize: 11 }}>
+                      <b style={{ color: '#45385e' }}>ปี {item.assessment.year}</b>
+                      <span style={{ color: '#7e719c', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{[item.landRemaining > 0 ? `ภาษีที่ดินฯ ฿${formatCurrency(item.landRemaining)}` : '', item.signRemaining > 0 ? `ภาษีป้าย ฿${formatCurrency(item.signRemaining)}` : ''].filter(Boolean).join(' · ')}</span>
+                      <b style={{ color: '#c0392b', whiteSpace: 'nowrap' }}>฿{formatCurrency(item.landRemaining + item.signRemaining)}</b>
+                    </div>)}
                   </div>
 
                   <div style={{ fontSize: 12, fontWeight: 700, color: '#2d2545', margin: '12px 0 7px' }}>ประวัติการติดต่อ</div>
@@ -1420,10 +1455,10 @@ export default function DashboardPage() {
           <EmptyState icon="🎉" title="ไม่มีรายการ" sub="ไม่พบรายการในหมวดนี้" />
         ) : (
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <table style={{ width: '100%', minWidth: 1480, borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr style={{ background: 'rgba(240,236,251,0.5)' }}>
-                  {['#', 'รหัส', 'ชื่อ-นามสกุล', 'ประเภทภาษี', 'ยอดประเมินปีปัจจุบัน', 'ยอดค้างชำระรวมทุกปี', 'หมายเหตุหนี้', 'ติดต่อล่าสุด', 'ผลการติดต่อ', 'วันนัด', 'สถานะ', ''].map(h => (
+                  {['#', 'รหัส', 'ชื่อ-นามสกุล', 'ประเภทภาษี', 'ยอดประเมินปีปัจจุบัน', 'ยอดค้างชำระรวมทุกปี', 'หมายเหตุหนี้', 'ติดต่อล่าสุด', 'ผลการติดต่อ', 'สถานะ'].map(h => (
                     <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 600, color: '#6b5b95', whiteSpace: 'nowrap', borderBottom: '1px solid rgba(200,190,240,0.25)', fontSize: 12 }}>{h}</th>
                   ))}
                 </tr>
@@ -1444,8 +1479,8 @@ export default function DashboardPage() {
                     <tr key={tp.id} className="table-row-hover" style={{ borderBottom: '1px solid rgba(200,190,240,0.15)' }}>
                       <td style={{ padding: '10px 14px', color: '#a89cc8', fontSize: 12 }}>{i + 1}</td>
                       <td style={{ padding: '10px 14px', fontFamily: 'monospace', fontSize: 11, color: '#7c5cbf' }}>{tp.ownerCode}</td>
-                      <td style={{ padding: '10px 14px', fontWeight: 500 }}>
-                        <button type="button" onClick={() => navigate(`/taxpayers/${tp.id}`)} style={{ border: 0, padding: 0, background: 'transparent', color: '#5c3d9e', font: 'inherit', fontWeight: 700, cursor: 'pointer', textAlign: 'left', textDecoration: 'underline', textDecorationColor: 'rgba(124,92,191,.3)', textUnderlineOffset: 3 }}>
+                      <td style={{ padding: '10px 14px', fontWeight: 500, minWidth: 225, whiteSpace: 'nowrap' }}>
+                        <button type="button" onClick={() => navigate(`/taxpayers/${tp.id}`)} style={{ border: 0, padding: 0, background: 'transparent', color: '#5c3d9e', font: 'inherit', fontWeight: 700, cursor: 'pointer', textAlign: 'left', textDecoration: 'underline', textDecorationColor: 'rgba(124,92,191,.3)', textUnderlineOffset: 3, whiteSpace: 'nowrap' }}>
                           {getTaxpayerName(tp)}
                         </button>
                       </td>
@@ -1463,19 +1498,13 @@ export default function DashboardPage() {
                       <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 700, color: totalOutstanding > 0 ? '#c0392b' : '#1a8f5a', whiteSpace: 'nowrap' }}>฿{formatCurrency(totalOutstanding)} บาท</td>
                       <td style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>{priorOutstanding > 0 ? <span style={{ display: 'inline-block', padding: '3px 8px', borderRadius: 999, background: 'rgba(224,160,20,.10)', color: '#9a6800', fontSize: 10 }}>หนี้ค้างปีก่อน ฿{formatCurrency(priorOutstanding)}</span> : <span style={{ color: '#a89cc8' }}>-</span>}</td>
                       <td style={{ padding: '10px 14px', color: '#8873b5', fontSize: 12 }}>{lastFu ? formatDate(lastFu.date) : '-'}</td>
-                      <td style={{ padding: '10px 14px', fontSize: 12, color: '#6b5b95', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lastFu?.detail ?? '-'}</td>
-                      <td style={{ padding: '10px 14px', fontSize: 12, color: '#7c5cbf' }}>{lastFu?.promiseDate ? formatDate(lastFu.promiseDate) : '-'}</td>
+                      <td style={{ padding: '10px 14px', fontSize: 12, color: '#6b5b95', minWidth: 130, whiteSpace: 'nowrap' }} title={lastFu?.detail ?? undefined}>{lastFu?.result ? CONTACT_RESULT_LABELS[lastFu.result] ?? lastFu.result : '-'}</td>
                       <td style={{ padding: '10px 14px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}>
                           <StatusBadge status={payStat} size="sm" />
                           {payStat !== 'paid' && <StatusBadge status={followStat} size="sm" />}
                           {installmentCount > 0 && <span style={{ color: '#8873b5', fontSize: 10 }}>งวดล่าสุด {installmentCount}</span>}
                         </div>
-                      </td>
-                      <td style={{ padding: '10px 14px' }}>
-                        <button className="btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }} onClick={() => navigate(`/taxpayers/${tp.id}`)}>
-                          ตรวจสอบรายละเอียด →
-                        </button>
                       </td>
                     </tr>
                   )
