@@ -28,7 +28,7 @@ export default function ManageTaxpayersPage() {
     if (page > pageCount) setPage(pageCount)
   }, [page, pageCount])
 
-  return <div style={{ padding: 24, maxWidth: 1300 }}>
+  return <div className="app-fluid-page">
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 18 }}>
       <div><h2 style={{ margin: 0, fontSize: 20 }}>ทะเบียนผู้เสียภาษี</h2><div style={{ color: '#a89cc8', fontSize: 12, marginTop: 4 }}>{currentUser?.role === 'officer' ? `รายชื่อผู้เสียภาษีกลุ่ม ${currentUser.group}` : 'รายชื่อผู้เสียภาษีทุกกลุ่มรับผิดชอบ'}</div></div>
       {canWrite && <button className="btn-primary" onClick={() => navigate('/taxpayers/new')}>＋ ลงทะเบียนผู้เสียภาษีรายใหม่</button>}

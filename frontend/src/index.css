@@ -187,6 +187,19 @@ select.input-field {
 
 .table-row-hover:hover { background: rgba(124,92,191,0.04); }
 
+/* Main application pages use every available pixel after the sidebar. */
+.app-fluid-page {
+  width: 100%;
+  max-width: none !important;
+  min-width: 0;
+  padding: clamp(14px, 1.35vw, 28px) !important;
+  margin: 0;
+}
+
+@media (max-width: 760px) {
+  .app-fluid-page { padding: 12px !important; }
+}
+
 /* Annual taxpayer register: allow the complete table to move naturally. */
 .annual-taxpayer-page .annual-table-wrap {
   width: 100%;

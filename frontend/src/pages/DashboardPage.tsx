@@ -913,7 +913,7 @@ export default function DashboardPage() {
   ]
 
   return (
-    <div style={{ padding: 24, maxWidth: 1400 }}>
+    <div className="app-fluid-page">
       {/* Toast */}
       {callLogToast && (
         <div style={{

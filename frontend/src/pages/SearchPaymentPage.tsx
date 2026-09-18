@@ -505,7 +505,7 @@ export default function SearchPaymentPage() {
   }
 
   return (
-    <div style={{ padding: 24, maxWidth: 1300, position: 'relative' }}>
+    <div className="app-fluid-page" style={{ position: 'relative' }}>
 
       {/* Toast */}
       {toast && (
@@ -780,20 +780,14 @@ export default function SearchPaymentPage() {
                               <td style={TD}>{taxTypes.length ? <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', minWidth: 150 }}>{taxTypes.map(type => <span key={type} style={TAX_TYPE_BADGE}>{type}</span>)}</div> : <span style={{ color: '#a89cc8' }}>—</span>}</td>
                               <td style={{ ...TD, fontSize: 12, color: '#a89cc8' }}>{c.matchScope === 'cumulative' ? `ถึง ${selectedYear}` : c.taxYear}</td>
                               <td style={{ ...TD, textAlign: 'right' }}>฿{formatCurrency(c.assessedForType)}</td>
-                              <td style={{ ...TD, fontSize: 12, color: '#7c5cbf', fontWeight: 600 }}>
-                                {(c.matchDetails ?? []).map((match, matchIndex) => {
-                                  const label = match.scope === 'cumulative'
-                                    ? 'ยอดค้างสะสมทุกปี'
-                                    : match.taxType === 'land'
-                                      ? 'ภาษีที่ดินและสิ่งปลูกสร้าง'
-                                      : match.taxType === 'sign' ? 'ภาษีป้าย' : 'ยอดรวม'
-                                  return <div key={`${match.scope}-${match.taxYear}-${match.taxType}`} style={{ marginTop: matchIndex ? 4 : 0, whiteSpace: 'nowrap' }}>
-                                    {label}
-                                    <span style={{ marginLeft: 5, fontSize: 10.5, fontWeight: 500, color: match.exact ? '#168653' : '#8a6c2b' }}>
-                                      {match.exact ? '(ยอดตรง)' : `(ใกล้เคียง ฿${formatCurrency(Math.abs(match.diff))})`}
-                                    </span>
-                                  </div>
-                                })}
+                              <td style={{ ...TD, fontSize: 12, color: '#7c5cbf', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                                {(() => {
+                                  const taxMatches = (c.matchDetails ?? [])
+                                    .filter(match => match.scope === 'year' && match.taxType !== 'both')
+                                    .filter((match, index, all) => all.findIndex(other => other.taxYear === match.taxYear && other.taxType === match.taxType) === index)
+                                  if (!taxMatches.length) return '—'
+                                  return taxMatches.map(match => `${match.taxType === 'land' ? 'ภาษีที่ดินและสิ่งปลูกสร้าง' : 'ภาษีป้าย'} ปี ${match.taxYear}`).join(' · ')
+                                })()}
                               </td>
                               <td style={{ ...TD, textAlign: 'right', color: '#1a8f5a' }}>฿{formatCurrency(paid)}</td>
                               <td style={{ ...TD, textAlign: 'right', fontWeight: 700, color: '#c0392b' }}>฿{formatCurrency(c.remainingForType)}</td>

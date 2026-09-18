@@ -756,7 +756,7 @@ const handleInlineAdd = async () => {
 
   if (!hasSelectedYearData) {
     return (
-      <div className="annual-taxpayer-page" style={{ padding: 24, maxWidth: 1400 }}>
+      <div className="annual-taxpayer-page app-fluid-page">
         <div className="glass-card" style={{
           minHeight: 360,
           padding: '54px 24px',
@@ -832,7 +832,7 @@ const handleInlineAdd = async () => {
   }
 
   return (
-    <div className="annual-taxpayer-page" style={{ padding: 24, maxWidth: 1400 }}>
+    <div className="annual-taxpayer-page app-fluid-page">
       {/* toolbar */}
       <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
         <input className="input-field" style={{ width: 240 }} placeholder="🔍 ค้นหาชื่อ, รหัส, หมายเลขโทรศัพท์"

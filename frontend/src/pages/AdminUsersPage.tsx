@@ -95,7 +95,7 @@ export default function AdminUsersPage() {
     finally { setBusy(false) }
   }
 
-  return <div style={{ padding: '24px 28px 36px', width: '100%', maxWidth: 1180 }}>
+  return <div className="app-fluid-page" style={{ paddingBottom: 36 }}>
     <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 18, marginBottom: 20, flexWrap: 'wrap' }}>
       <div><h2 style={{ margin: '0 0 4px', fontSize: 21 }}>จัดการผู้ใช้งาน</h2><p style={SUB}>สร้างบัญชี กำหนดสิทธิ์ และควบคุมกลุ่มข้อมูลที่ผู้ใช้งานรับผิดชอบ</p></div>
       <button type="button" className="btn-primary" onClick={openAdd}>＋ เพิ่มผู้ใช้งาน</button>

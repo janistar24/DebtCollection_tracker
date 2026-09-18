@@ -71,7 +71,7 @@ export default function ReportPage() {
   const groupLabel = groupFilter === 'all' ? 'ทุกกลุ่ม' : `กลุ่ม ${groupFilter}`
   const officer = groupFilter === 'all' ? 'ผู้รับผิดชอบทุกคน' : users.find(user => user.id === filtered[0]?.responsibleOfficer)?.name ?? currentUser?.name ?? '-'
 
-  return <div className="report-page" style={{ padding: 24, maxWidth: 1200 }}>
+  return <div className="report-page app-fluid-page">
     <div className="glass-card no-print" style={{ padding: '16px 20px', marginBottom: 16, display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
       {isDirector && <Filter label="กลุ่มผู้รับผิดชอบ" value={groupFilter} setValue={setGroupFilter} options={[['all','ทุกกลุ่ม'],...GROUPS.map(g => [g,`กลุ่ม ${g}`])]} />}
       <Filter label="สถานะ" value={statusFilter} setValue={setStatusFilter} options={[['all','ทุกสถานะ'],['unpaid','ยังไม่ชำระ'],['partial','ชำระบางส่วน'],['paid','ชำระครบ']]} />

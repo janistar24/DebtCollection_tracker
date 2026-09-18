@@ -442,7 +442,7 @@ export default function TaxpayerDetailPage() {
   }
 
   return (
-    <div style={{ padding: 24, maxWidth: 1100 }}>
+    <div className="app-fluid-page">
       {/* breadcrumb */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20, fontSize: 13, color: '#a89cc8' }}>
         <button className="btn-ghost" onClick={() => navigate('/dashboard')} style={{ fontSize: 13, padding: '4px 8px' }}>หน้าหลัก</button>
