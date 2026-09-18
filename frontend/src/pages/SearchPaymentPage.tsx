@@ -44,6 +44,16 @@ interface Candidate {
   diff: number
   exact: boolean
   matchScope?: 'year' | 'cumulative'
+  matchDetails?: CandidateMatch[]
+}
+
+interface CandidateMatch {
+  taxYear: number
+  taxType: 'land' | 'sign' | 'both'
+  remaining: number
+  diff: number
+  exact: boolean
+  scope: 'year' | 'cumulative'
 }
 
 type TaskSearchScope = 'all' | 'today' | 'previous'
@@ -308,19 +318,44 @@ export default function SearchPaymentPage() {
       }]
     }) : []
 
-    const results = [...yearlyResults, ...cumulativeResults]
+    const uniqueResults = [...yearlyResults, ...cumulativeResults]
     .filter((candidate, index, all) => all.findIndex(other =>
       other.tp.id === candidate.tp.id
       && other.taxYear === candidate.taxYear
       && other.taxType === candidate.taxType
+      && other.matchScope === candidate.matchScope
       && Math.abs(other.remainingForType - candidate.remainingForType) < 0.01
     ) === index)
 
-    .sort(
-      (a, b) =>
-        Math.abs(a.diff) -
-        Math.abs(b.diff)
-    )
+    // หนึ่งคนอาจมียอดที่ค้นหาตรงได้หลายมุมมอง (เช่น ยอดรวมและภาษีป้าย)
+    // จัดกลุ่มเป็นหนึ่งแถวต่อผู้เสียภาษี แล้วเก็บเหตุผลที่ตรงทั้งหมดไว้ในรายละเอียด
+    const groupedResults = new Map<string, Candidate[]>()
+    uniqueResults.forEach(candidate => {
+      const current = groupedResults.get(candidate.tp.id) ?? []
+      current.push(candidate)
+      groupedResults.set(candidate.tp.id, current)
+    })
+
+    const results = Array.from(groupedResults.values())
+    .map(matches => {
+      const ranked = [...matches].sort((a, b) =>
+        Number(b.exact) - Number(a.exact)
+        || Math.abs(a.diff) - Math.abs(b.diff)
+        || Number(b.matchScope === 'cumulative') - Number(a.matchScope === 'cumulative')
+      )
+      return {
+        ...ranked[0],
+        matchDetails: ranked.map(match => ({
+          taxYear: match.taxYear,
+          taxType: match.taxType,
+          remaining: match.remainingForType,
+          diff: match.diff,
+          exact: match.exact,
+          scope: match.matchScope ?? 'year',
+        })),
+      }
+    })
+    .sort((a, b) => Number(b.exact) - Number(a.exact) || Math.abs(a.diff) - Math.abs(b.diff))
 
     .slice(0, 20)
 
@@ -686,7 +721,7 @@ export default function SearchPaymentPage() {
               <div>
                 <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
                   <span style={{ fontSize: 14, fontWeight: 700, color: '#2d2545' }}>
-                    พบ {candidates.length} รายการ{searchedAmt && ` ที่อาจตรงกับยอด ฿${searchedAmt} บาท`}
+                    พบ {candidates.length} ราย{searchedAmt && ` ที่อาจตรงกับยอด ฿${searchedAmt} บาท`}
                   </span>
                   {exactCandidates.length > 0 && (
                     <span className="status-badge" style={{ background: '#e8fdf4', color: '#1a8f5a', fontSize: 12 }}>
@@ -719,7 +754,10 @@ export default function SearchPaymentPage() {
                           const accumulatedOutstanding = getAccumulatedOutstanding(tp, selectedYear)
                           const accumulatedAssessed = tp.assessments.filter(item => item.year <= selectedYear).reduce((sum, item) => sum + item.landAmount + item.signAmount, 0)
                           const paid = c.matchScope === 'cumulative' ? Math.max(0, accumulatedAssessed - accumulatedOutstanding) : assessed - remaining
-                          const taxType = [assess?.landAmount ? 'ภาษีที่ดินและสิ่งปลูกสร้าง' : null, assess?.signAmount ? 'ป้าย' : null].filter(Boolean).join('+')
+                          const taxTypes = [
+                            assess?.landAmount ? 'ภาษีที่ดินและสิ่งปลูกสร้าง' : null,
+                            assess?.signAmount ? 'ภาษีป้าย' : null,
+                          ].filter((item): item is string => Boolean(item))
                           const isSelected = drawerTp?.id === tp.id && drawerTaxYear === c.taxYear
                           const diffSign = c.diff >= 0 ? '+' : ''
 
@@ -739,10 +777,24 @@ export default function SearchPaymentPage() {
                               </td>
                               <td style={{ ...TD, fontFamily: 'monospace', fontSize: 11, color: '#7c5cbf' }}>{tp.ownerCode}</td>
                               <td style={{ ...TD, fontWeight: 500, color: '#2d2545', whiteSpace: 'nowrap' }}>{getTaxpayerName(tp)}</td>
-                              <td style={{ ...TD, fontSize: 12, color: '#6b5b95' }}>{taxType || '-'}</td>
+                              <td style={TD}>{taxTypes.length ? <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', minWidth: 150 }}>{taxTypes.map(type => <span key={type} style={TAX_TYPE_BADGE}>{type}</span>)}</div> : <span style={{ color: '#a89cc8' }}>—</span>}</td>
                               <td style={{ ...TD, fontSize: 12, color: '#a89cc8' }}>{c.matchScope === 'cumulative' ? `ถึง ${selectedYear}` : c.taxYear}</td>
                               <td style={{ ...TD, textAlign: 'right' }}>฿{formatCurrency(c.assessedForType)}</td>
-                              <td style={{ ...TD, fontSize: 12, color: '#7c5cbf', fontWeight: 600 }}> {c.matchScope === 'cumulative' ? 'ยอดค้างสะสมทุกปี' : c.taxType === 'land' ? 'ภาษีที่ดินและสิ่งปลูกสร้าง' : c.taxType === 'sign' ? 'ภาษีป้าย' : 'ยอดรวม'} </td>
+                              <td style={{ ...TD, fontSize: 12, color: '#7c5cbf', fontWeight: 600 }}>
+                                {(c.matchDetails ?? []).map((match, matchIndex) => {
+                                  const label = match.scope === 'cumulative'
+                                    ? 'ยอดค้างสะสมทุกปี'
+                                    : match.taxType === 'land'
+                                      ? 'ภาษีที่ดินและสิ่งปลูกสร้าง'
+                                      : match.taxType === 'sign' ? 'ภาษีป้าย' : 'ยอดรวม'
+                                  return <div key={`${match.scope}-${match.taxYear}-${match.taxType}`} style={{ marginTop: matchIndex ? 4 : 0, whiteSpace: 'nowrap' }}>
+                                    {label}
+                                    <span style={{ marginLeft: 5, fontSize: 10.5, fontWeight: 500, color: match.exact ? '#168653' : '#8a6c2b' }}>
+                                      {match.exact ? '(ยอดตรง)' : `(ใกล้เคียง ฿${formatCurrency(Math.abs(match.diff))})`}
+                                    </span>
+                                  </div>
+                                })}
+                              </td>
                               <td style={{ ...TD, textAlign: 'right', color: '#1a8f5a' }}>฿{formatCurrency(paid)}</td>
                               <td style={{ ...TD, textAlign: 'right', fontWeight: 700, color: '#c0392b' }}>฿{formatCurrency(c.remainingForType)}</td>
                               <td style={{ ...TD, textAlign: 'right', fontWeight: 700, color: '#8a5a00' }}>฿{formatCurrency(accumulatedOutstanding)}{getPriorYearOutstanding(tp, selectedYear) > 0 && <div style={{ fontSize: 10, fontWeight: 500, color: '#a89cc8', marginTop: 2 }}>รวมหนี้ปีก่อน ฿{formatCurrency(getPriorYearOutstanding(tp, selectedYear))}</div>}</td>
@@ -1247,3 +1299,4 @@ const LBL: React.CSSProperties = { display: 'block', fontSize: 12, fontWeight: 6
 const SLIM: React.CSSProperties = { fontSize: 11, color: '#a89cc8', marginBottom: 3 }
 const TH: React.CSSProperties = { padding: '10px 14px', textAlign: 'left', fontWeight: 600, color: '#6b5b95', whiteSpace: 'nowrap', borderBottom: '1px solid rgba(200,190,240,0.25)', fontSize: 12 }
 const TD: React.CSSProperties = { padding: '10px 14px', verticalAlign: 'middle' }
+const TAX_TYPE_BADGE: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', padding: '3px 8px', borderRadius: 6, border: '1px solid rgba(124,92,191,.22)', background: 'rgba(124,92,191,.08)', color: '#6745ae', fontSize: 11, lineHeight: 1.25, whiteSpace: 'nowrap' }

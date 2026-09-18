@@ -807,7 +807,15 @@ export default function DashboardPage() {
       : []
   )
   const paidTodayCount = new Set(paymentsToday.map(payment => payment.taxpayerId)).size
-  const receivedTodayAmount = paymentsToday.reduce((sum, payment) => sum + Number(payment.amount || 0), 0)
+  const paymentsTodayById = new Map<string, typeof paymentsToday>()
+  paymentsToday.forEach(payment => {
+    const rows = paymentsTodayById.get(payment.id) ?? []
+    rows.push(payment)
+    paymentsTodayById.set(payment.id, rows)
+  })
+  const receivedTodayAmount = Array.from(paymentsTodayById.values()).reduce((sum, rows) =>
+    sum + Number(rows.find(payment => payment.receivedAmount !== undefined)?.receivedAmount
+      ?? rows.reduce((allocated, payment) => allocated + Number(payment.amount || 0), 0)), 0)
 
   const previousPendingCount = taskTaxpayers.length - contactedTodayCount
 

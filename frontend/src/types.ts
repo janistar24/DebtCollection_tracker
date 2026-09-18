@@ -45,6 +45,9 @@ export interface Payment {
   allocatedSign: number
   recordedBy: string
   taxYear?: number
+  receivedAmount?: number
+  overpayment?: number
+  note?: string
 }
 
 export interface FollowUp {

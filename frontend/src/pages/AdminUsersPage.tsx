@@ -28,12 +28,25 @@ export default function AdminUsersPage() {
     setNotice({ type, text })
     window.setTimeout(() => setNotice(null), 4200)
   }
-  const openAdd = () => { setEditUser(null); setForm(EMPTY); setCreateMode('password'); setShowForm(true) }
+  const openAdd = () => { setNotice(null); setEditUser(null); setForm(EMPTY); setCreateMode('password'); setShowForm(true) }
   const openEdit = (u: User) => {
+    setNotice(null)
+    setCreateMode('password')
     setEditUser(u)
     setForm({ name: u.name, username: u.username ?? '', email: u.email ?? '', password: '', role: u.role, group: u.group ?? 'ก-น', active: u.active })
     setShowForm(true)
   }
+
+  const nameParts = form.name.trim().split(/\s+/).filter(Boolean)
+  const formDisabledReason = nameParts.length < 2
+    ? 'กรุณาระบุชื่อและนามสกุลให้ครบถ้วน'
+    : (editUser || createMode === 'password') && !form.username.trim()
+      ? 'กรุณาระบุชื่อผู้ใช้งาน'
+      : !editUser && createMode === 'password' && form.password.length < 12
+        ? `รหัสผ่านชั่วคราวต้องมีอย่างน้อย 12 ตัวอักษร (ขาดอีก ${12 - form.password.length} ตัว)`
+        : !editUser && createMode === 'email' && !form.email.trim()
+          ? 'กรุณาระบุอีเมลผู้รับคำเชิญ'
+          : ''
 
   const save = async () => {
     const parts = form.name.trim().split(/\s+/), firstName = parts.shift() ?? '', lastName = parts.join(' ')
@@ -85,7 +98,7 @@ export default function AdminUsersPage() {
   return <div style={{ padding: '24px 28px 36px', width: '100%', maxWidth: 1180 }}>
     <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 18, marginBottom: 20, flexWrap: 'wrap' }}>
       <div><h2 style={{ margin: '0 0 4px', fontSize: 21 }}>จัดการผู้ใช้งาน</h2><p style={SUB}>สร้างบัญชี กำหนดสิทธิ์ และควบคุมกลุ่มข้อมูลที่ผู้ใช้งานรับผิดชอบ</p></div>
-      <button className="btn-primary" onClick={openAdd}>＋ เพิ่มผู้ใช้งาน</button>
+      <button type="button" className="btn-primary" onClick={openAdd}>＋ เพิ่มผู้ใช้งาน</button>
     </div>
     {notice && <div role="alert" style={{ marginBottom: 14, padding: '11px 14px', borderRadius: 11, fontSize: 13.5, background: notice.type === 'success' ? '#ecf9f2' : '#fff1f0', border: `1px solid ${notice.type === 'success' ? '#b9e7ce' : '#f2c1bd'}`, color: notice.type === 'success' ? '#18794e' : '#b42318' }}>{notice.type === 'success' ? '✓' : '⚠'} {notice.text}</div>}
 
@@ -103,10 +116,10 @@ export default function AdminUsersPage() {
             <td style={{ ...TD, color: '#6b5b95' }}>{u.role === 'officer' ? `กลุ่ม ${u.group ?? 'ยังไม่กำหนด'}` : 'ทุกกลุ่ม'}</td>
             <td style={TD}><StatusBadge status={u.active ? 'active' : 'inactive'} size="sm" /></td>
             <td style={TD}><div style={{ display: 'flex', gap: 3, whiteSpace: 'nowrap' }}>
-              <button style={ACTION} onClick={() => openEdit(u)}>แก้ไข</button>
-              <button style={ACTION} onClick={() => { setResetTarget(u); setNewPassword('') }}>รีเซ็ตรหัสผ่าน</button>
-              <button style={{ ...ACTION, color: u.active ? '#a55b16' : '#168653' }} disabled={self} title={self ? 'ไม่สามารถปิดบัญชีที่กำลังใช้งานอยู่' : ''} onClick={() => setActiveTarget(u)}>{u.active ? 'ปิดการใช้งาน' : 'เปิดใช้งาน'}</button>
-              <button style={{ ...ACTION, color: '#c0392b' }} disabled={self} title={self ? 'ไม่สามารถลบบัญชีที่กำลังใช้งานอยู่' : ''} onClick={() => setDeleteTarget(u)}>ลบบัญชี</button>
+              <button type="button" style={ACTION} onClick={() => openEdit(u)}>แก้ไข</button>
+              <button type="button" style={ACTION} onClick={() => { setResetTarget(u); setNewPassword('') }}>รีเซ็ตรหัสผ่าน</button>
+              <button type="button" style={{ ...ACTION, color: u.active ? '#a55b16' : '#168653' }} disabled={self} title={self ? 'ไม่สามารถปิดบัญชีที่กำลังใช้งานอยู่' : ''} onClick={() => setActiveTarget(u)}>{u.active ? 'ปิดการใช้งาน' : 'เปิดใช้งาน'}</button>
+              <button type="button" style={{ ...ACTION, color: '#c0392b' }} disabled={self} title={self ? 'ไม่สามารถลบบัญชีที่กำลังใช้งานอยู่' : ''} onClick={() => setDeleteTarget(u)}>ลบบัญชี</button>
             </div></td>
           </tr>
         })}</tbody>
@@ -115,7 +128,8 @@ export default function AdminUsersPage() {
 
     {showForm && <Modal title={editUser ? 'แก้ไขข้อมูลผู้ใช้งาน' : 'เพิ่มผู้ใช้งาน'} onClose={() => !busy && setShowForm(false)} maxWidth="650px">
       <p style={SUB}>กำหนดข้อมูลบัญชีและขอบเขตสิทธิ์ให้สอดคล้องกับหน้าที่รับผิดชอบ</p>
-      {!editUser && <div style={{ display: 'flex', gap: 8, marginTop: 15 }}><button className={createMode === 'password' ? 'btn-primary' : 'btn-secondary'} onClick={() => setCreateMode('password')}>กำหนดรหัสผ่านให้</button><button className={createMode === 'email' ? 'btn-primary' : 'btn-secondary'} onClick={() => setCreateMode('email')}>สร้างลิงก์คำเชิญ</button></div>}
+      {notice?.type === 'error' && <div role="alert" style={{ ...DANGER, marginTop: 14 }}>{notice.text}</div>}
+      {!editUser && <div style={{ display: 'flex', gap: 8, marginTop: 15 }}><button type="button" className={createMode === 'password' ? 'btn-primary' : 'btn-secondary'} onClick={() => { setCreateMode('password'); setNotice(null) }}>กำหนดรหัสผ่านให้</button><button type="button" className={createMode === 'email' ? 'btn-primary' : 'btn-secondary'} onClick={() => { setCreateMode('email'); setNotice(null) }}>สร้างลิงก์คำเชิญ</button></div>}
       <div style={{ display: 'grid', gap: 15, marginTop: 16 }}>
         <Field label="ชื่อ-นามสกุล *"><input className="input-field" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
         <div style={GRID}>{(editUser || createMode === 'password') && <Field label="ชื่อผู้ใช้งาน *"><input className="input-field" autoComplete="off" value={form.username} onChange={e => setForm({ ...form, username: e.target.value })} /></Field>}<Field label={`อีเมล ${!editUser && createMode === 'email' ? '*' : '(ไม่บังคับ)'}`}><input className="input-field" type="email" autoComplete="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></Field></div>
@@ -123,16 +137,17 @@ export default function AdminUsersPage() {
         <div style={GRID}><Field label="สิทธิ์การใช้งาน *"><select className="input-field" value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}><option value="officer">เจ้าหน้าที่ผู้รับผิดชอบ</option><option value="director">ผู้บริหาร</option><option value="admin">ผู้ดูแลระบบ</option></select></Field>{form.role === 'officer' && <Field label="กลุ่มที่รับผิดชอบ *"><select className="input-field" value={form.group} onChange={e => setForm({ ...form, group: e.target.value })}>{GROUPS.map(g => <option key={g} value={g}>กลุ่ม {g}</option>)}</select></Field>}</div>
         <div style={INFO}>{form.role === 'officer' ? 'เจ้าหน้าที่จะเข้าถึงข้อมูลเฉพาะกลุ่มที่ได้รับมอบหมาย' : `${ROLES[form.role as keyof typeof ROLES]}สามารถเข้าถึงข้อมูลภาพรวมของทุกกลุ่ม`}</div>
       </div>
-      <Actions busy={busy} disabled={!form.name.trim() || ((editUser || createMode === 'password') && !form.username.trim()) || (!editUser && createMode === 'password' && form.password.length < 12) || (!editUser && createMode === 'email' && !form.email.trim())} confirm={editUser ? 'บันทึกการแก้ไข' : createMode === 'email' ? 'สร้างลิงก์คำเชิญ' : 'บันทึกบัญชี'} cancel={() => setShowForm(false)} run={save} />
+      {formDisabledReason && <div style={{ marginTop: 14, color: '#875d13', fontSize: 12.5 }}>ⓘ {formDisabledReason}</div>}
+      <Actions busy={busy} disabled={Boolean(formDisabledReason)} confirm={editUser ? 'บันทึกการแก้ไข' : createMode === 'email' ? 'สร้างลิงก์คำเชิญ' : 'บันทึกบัญชี'} cancel={() => setShowForm(false)} run={save} />
     </Modal>}
 
     {invitationLink && <Modal title="สร้างลิงก์คำเชิญเรียบร้อยแล้ว" onClose={() => setInvitationLink('')} maxWidth="620px">
       <p style={SUB}>คัดลอกลิงก์ด้านล่างแล้วส่งให้ผู้ใช้งานโดยตรง ลิงก์ใช้ได้ครั้งเดียวและหมดอายุภายใน 48 ชั่วโมง</p>
       <div style={{ display: 'flex', gap: 9, marginTop: 16, alignItems: 'stretch' }}>
         <input className="input-field" readOnly value={invitationLink} onFocus={e => e.currentTarget.select()} />
-        <button className="btn-primary" style={{ whiteSpace: 'nowrap' }} onClick={async () => { await navigator.clipboard.writeText(invitationLink); notify('success', 'คัดลอกลิงก์คำเชิญแล้ว') }}>คัดลอกลิงก์</button>
+        <button type="button" className="btn-primary" style={{ whiteSpace: 'nowrap' }} onClick={async () => { await navigator.clipboard.writeText(invitationLink); notify('success', 'คัดลอกลิงก์คำเชิญแล้ว') }}>คัดลอกลิงก์</button>
       </div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 22 }}><button className="btn-primary" onClick={() => setInvitationLink('')}>เสร็จสิ้น</button></div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 22 }}><button type="button" className="btn-primary" onClick={() => setInvitationLink('')}>เสร็จสิ้น</button></div>
     </Modal>}
 
     {resetTarget && <Modal title="รีเซ็ตรหัสผ่าน" onClose={() => !busy && setResetTarget(null)}><p style={SUB}>กำหนดรหัสผ่านชั่วคราวใหม่สำหรับ <strong>{resetTarget.username}</strong></p><div style={{ marginTop: 16 }}><Field label="รหัสผ่านชั่วคราวใหม่ *"><input className="input-field" autoFocus type="password" autoComplete="new-password" placeholder="อย่างน้อย 12 ตัวอักษร" value={newPassword} onChange={e => setNewPassword(e.target.value)} /></Field></div><Actions busy={busy} disabled={newPassword.length < 12} confirm="ยืนยันการรีเซ็ต" cancel={() => setResetTarget(null)} run={resetPassword} /></Modal>}
@@ -144,7 +159,7 @@ export default function AdminUsersPage() {
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) { return <label><span style={LABEL}>{label}</span>{children}</label> }
-function Actions({ busy, disabled, danger, confirm, cancel, run }: { busy: boolean; disabled?: boolean; danger?: boolean; confirm: string; cancel: () => void; run: () => void }) { return <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 24 }}><button className="btn-secondary" disabled={busy} onClick={cancel}>ยกเลิก</button><button className={danger ? 'btn-secondary' : 'btn-primary'} style={danger ? { color: '#fff', background: '#c0392b', borderColor: '#c0392b' } : undefined} disabled={busy || disabled} onClick={run}>{busy ? 'กำลังดำเนินการ...' : confirm}</button></div> }
+function Actions({ busy, disabled, danger, confirm, cancel, run }: { busy: boolean; disabled?: boolean; danger?: boolean; confirm: string; cancel: () => void; run: () => void }) { return <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 24 }}><button type="button" className="btn-secondary" disabled={busy} onClick={cancel}>ยกเลิก</button><button type="button" className={danger ? 'btn-secondary' : 'btn-primary'} style={danger ? { color: '#fff', background: '#c0392b', borderColor: '#c0392b' } : undefined} disabled={busy || disabled} onClick={run}>{busy ? 'กำลังดำเนินการ...' : confirm}</button></div> }
 
 const SUB: CSSProperties = { margin: 0, fontSize: 13.5, color: '#8f82b1', lineHeight: 1.65 }
 const LABEL: CSSProperties = { display: 'block', fontSize: 12.5, fontWeight: 600, color: '#6b5b95', marginBottom: 6 }

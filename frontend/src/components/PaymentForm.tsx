@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useApp } from '../context/AppContext'
 import { createCompletePayment } from '../api/payments'
 import { formatCurrency, getInstallmentCount, getOutstandingYears, getTaxpayerName, getTotalAssessed } from '../data/taxData'
@@ -24,7 +24,7 @@ export default function PaymentForm({ taxpayer, year, initialAmount, initialMeth
   const totalOutstanding = rows.reduce((sum, row) => sum + row.remaining, 0)
   const installmentCount = getInstallmentCount(taxpayer)
   const nextInstallment = installmentCount + 1
-  const initialPayment = Math.min(initialAmount ?? totalOutstanding, totalOutstanding)
+  const initialPayment = initialAmount ?? totalOutstanding
   const [amount, setAmount] = useState(initialPayment > 0 ? String(initialPayment) : '')
   const [dateTime, setDateTime] = useState(localDateTimeNow())
   const [allocations, setAllocations] = useState<Record<number, string>>({})
@@ -38,7 +38,25 @@ export default function PaymentForm({ taxpayer, year, initialAmount, initialMeth
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const paymentAmount = Number(amount) || 0
-  const allocatedTotal = rows.filter(row => scope === 'both' || row.taxType === scope).reduce((sum, row) => sum + (Number(allocations[row.assessmentId]) || 0), 0)
+  const eligibleRows = useMemo(
+    () => rows.filter(row => scope === 'both' || row.taxType === scope),
+    [rows, scope],
+  )
+  const allocatedTotal = eligibleRows.reduce((sum, row) => sum + (Number(allocations[row.assessmentId]) || 0), 0)
+  const overpayment = Math.max(0, paymentAmount - totalOutstanding)
+  const unallocatedAmount = Math.max(0, paymentAmount - allocatedTotal - overpayment)
+
+  useEffect(() => {
+    let remainingPayment = paymentAmount
+    const automatic: Record<number, string> = {}
+    // rows เรียงปีเก่าไปปีใหม่ และภายในปีเรียงภาษีที่ดินก่อนภาษีป้าย
+    eligibleRows.forEach(row => {
+      const value = Math.max(0, Math.min(remainingPayment, row.remaining))
+      automatic[row.assessmentId] = value > 0 ? value.toFixed(2) : ''
+      remainingPayment = Math.max(0, remainingPayment - value)
+    })
+    setAllocations(automatic)
+  }, [paymentAmount, scope, rows])
 
   const setAllocation = (row: AllocationRow, raw: string) => {
     if (!raw) return setAllocations(current => ({ ...current, [row.assessmentId]: '' }))
@@ -48,8 +66,8 @@ export default function PaymentForm({ taxpayer, year, initialAmount, initialMeth
 
   const save = async () => {
     if (paymentAmount <= 0) return alert('กรุณากรอกยอดเงินที่รับชำระ')
-    if (paymentAmount > totalOutstanding) return alert('ยอดรับชำระมากกว่ายอดหนี้คงเหลือ')
-    if (Math.abs(allocatedTotal - paymentAmount) > 0.009) return alert('ผลรวมยอดที่จัดสรรต้องเท่ากับยอดเงินที่ได้รับ')
+    if (unallocatedAmount > 0.009) return alert('ยังมียอดเงินที่ไม่ได้จัดสรร กรุณาเลือกทั้งสองประเภทภาษีหรือตรวจสอบยอดอีกครั้ง')
+    if (Math.abs(allocatedTotal + overpayment - paymentAmount) > 0.009) return alert('ผลรวมยอดที่จัดสรรและยอดชำระเกินต้องเท่ากับยอดเงินที่ได้รับ')
     const selected = rows.filter(row => scope === 'both' || row.taxType === scope).map(row => ({ ...row, allocatedAmount: Number(allocations[row.assessmentId]) || 0 })).filter(row => row.allocatedAmount > 0)
     try {
       setSaving(true)
@@ -106,7 +124,7 @@ export default function PaymentForm({ taxpayer, year, initialAmount, initialMeth
         {([['land', '🏠 ภาษีที่ดินและสิ่งปลูกสร้าง', hasLand], ['sign', '🪧 ภาษีป้าย', hasSign], ['both', '🏠 + 🪧 ทั้งสองประเภท', hasLand && hasSign]] as const).map(([value, label, enabled]) => <button key={value} type="button" disabled={!enabled} onClick={() => enabled && setScope(value)} style={taxChoiceStyle(scope === value, enabled)}>{label}</button>)}
       </div>
       <label style={LABEL}>จัดสรรยอดชำระตามปีและประเภทภาษี *</label>
-      <div style={{ fontSize: 12, color: '#8873b5', marginBottom: 8 }}>ระบุจำนวนเงินที่ต้องการตัดยอดในแต่ละรายการ</div>
+      <div style={{ fontSize: 12, color: '#8873b5', marginBottom: 8 }}>ระบบจัดสรรให้อัตโนมัติจากหนี้ปีเก่าสุดก่อน โดยตัดภาษีที่ดินและสิ่งปลูกสร้างก่อนภาษีป้าย และสามารถปรับแก้ได้ก่อนบันทึก</div>
       <div style={ALLOCATION_BOX}>
         {outstandingYears.map(({ assessment }) => {
           const yearRows = rows.filter(row => row.year === assessment.year)
@@ -119,12 +137,14 @@ export default function PaymentForm({ taxpayer, year, initialAmount, initialMeth
             </div>)}
           </div>
         })}
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: Math.abs(allocatedTotal - paymentAmount) < .009 ? '#1a8f5a' : '#c0392b', marginTop: 10 }}><span>รวมยอดที่จัดสรร</span><b>฿{formatCurrency(allocatedTotal)} / ฿{formatCurrency(paymentAmount)}</b></div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: Math.abs(allocatedTotal + overpayment - paymentAmount) < .009 && unallocatedAmount < .009 ? '#1a8f5a' : '#c0392b', marginTop: 10 }}><span>รวมยอดที่จัดสรร</span><b>฿{formatCurrency(allocatedTotal)} / ฿{formatCurrency(paymentAmount)}</b></div>
+        {overpayment > 0 && <div style={{ marginTop: 9, padding: '9px 11px', borderRadius: 9, background: '#fff8e6', color: '#8a5a00', fontSize: 12.5, display: 'flex', justifyContent: 'space-between', gap: 10 }}><span>หมายเหตุ: ชำระเกิน</span><b>ส่วนต่าง ฿{formatCurrency(overpayment)}</b></div>}
+        {unallocatedAmount > 0 && <div style={{ marginTop: 8, color: '#b42318', fontSize: 12 }}>ยังไม่ได้จัดสรร ฿{formatCurrency(unallocatedAmount)} กรุณาเลือก “ทั้งสองประเภท” เพื่อตัดยอดตามลำดับอัตโนมัติ</div>}
       </div>
     </div>
     <div style={{ marginBottom: 14 }}><label style={LABEL}>วิธีชำระ *</label><div style={{ display: 'flex', gap: 8 }}>{([['transfer', '💳 โอนเงิน'], ['cash', '💵 เงินสด']] as const).map(([value, label]) => <button key={value} type="button" onClick={() => setMethod(value)} style={{ ...choiceStyle(method === value), flex: 1 }}>{label}</button>)}</div></div>
     <div style={{ marginBottom: 18 }}><label style={LABEL}>{method === 'transfer' ? 'เลขอ้างอิงการโอน' : 'เลขที่ใบเสร็จ'}</label><input className="input-field" value={method === 'transfer' ? reference : receipt} onChange={event => method === 'transfer' ? setReference(event.target.value) : setReceipt(event.target.value)} placeholder={method === 'transfer' ? 'TRF...' : 'RC2569-...'} /></div>
-    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}><button type="button" className="btn-secondary" onClick={onCancel}>ยกเลิก</button><button type="button" className="btn-primary" disabled={saving || !dateTime || paymentAmount <= 0 || Math.abs(allocatedTotal - paymentAmount) > .009} onClick={() => void save()}>{saving ? 'กำลังบันทึก...' : `💾 บันทึกการชำระงวดที่ ${nextInstallment}`}</button></div>
+    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}><button type="button" className="btn-secondary" onClick={onCancel}>ยกเลิก</button><button type="button" className="btn-primary" disabled={saving || !dateTime || paymentAmount <= 0 || unallocatedAmount > .009 || Math.abs(allocatedTotal + overpayment - paymentAmount) > .009} onClick={() => void save()}>{saving ? 'กำลังบันทึก...' : `💾 บันทึกการชำระงวดที่ ${nextInstallment}`}</button></div>
     <style>{`@media(max-width:640px){.payment-main-fields{grid-template-columns:1fr!important}.payment-allocation-row{grid-template-columns:1fr 120px!important}.payment-allocation-row>span:last-child{display:none}}`}</style>
   </>
 }

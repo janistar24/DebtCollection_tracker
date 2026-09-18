@@ -1,5 +1,5 @@
 import type { User, UserRole, Group } from '../types'
-import { API_URL } from './config'
+import { API_URL, readApiJson } from './config'
 
 interface UserApi {
   user_id: number
@@ -22,16 +22,18 @@ interface UsersResponse {
 }
 
 export async function getUsers(): Promise<User[]> {
-  const response = await fetch(`${API_URL}/users`)
-
-  if (!response.ok) {
-    throw new Error(`โหลดข้อมูลผู้ใช้งานไม่สำเร็จ: ${response.status}`)
+  let response: Response
+  try {
+    response = await fetch(`${API_URL}/users`)
+  } catch {
+    throw new Error('ไม่สามารถเชื่อมต่อระบบจัดการผู้ใช้งานได้ กรุณาตรวจสอบ Backend และลองใหม่อีกครั้ง')
   }
+  const result = (await readApiJson(response)) as UsersResponse & { detail?: string | { message?: string }; request_id?: string }
 
-  const result = (await response.json()) as UsersResponse
-
-  if (!result.success) {
-    throw new Error('API ไม่สามารถส่งข้อมูลผู้ใช้งานได้')
+  if (!response.ok || !result.success) {
+    const message = typeof result.detail === 'string' ? result.detail : result.detail?.message
+    const requestId = result.request_id ? ` (Request ID: ${result.request_id})` : ''
+    throw new Error(`${message ?? `โหลดข้อมูลผู้ใช้งานไม่สำเร็จ (HTTP ${response.status})`}${requestId}`)
   }
 
   return result.data.map((user) => ({
@@ -58,14 +60,21 @@ export interface SaveUserInput {
 }
 
 async function userMutation(url: string, method: string, data?: unknown) {
-  const response = await fetch(url, {
-    method,
-    headers: data ? { 'Content-Type': 'application/json' } : undefined,
-    body: data ? JSON.stringify(data) : undefined,
-  })
-  const result = await response.json()
+  let response: Response
+  try {
+    response = await fetch(url, {
+      method,
+      headers: data ? { 'Content-Type': 'application/json' } : undefined,
+      body: data ? JSON.stringify(data) : undefined,
+    })
+  } catch {
+    throw new Error('ไม่สามารถเชื่อมต่อ Backend ได้ กรุณาตรวจสอบการเชื่อมต่อแล้วลองใหม่อีกครั้ง')
+  }
+  const result = await readApiJson(response)
   if (!response.ok || !result.success) {
-    throw new Error(typeof result.detail === 'string' ? result.detail : result.detail?.message ?? 'บันทึกผู้ใช้งานไม่สำเร็จ')
+    const message = typeof result.detail === 'string' ? result.detail : result.detail?.message
+    const requestId = result.request_id ? ` (Request ID: ${result.request_id})` : ''
+    throw new Error(`${message ?? `ดำเนินการไม่สำเร็จ (HTTP ${response.status})`}${requestId}`)
   }
   return result
 }
@@ -101,7 +110,13 @@ export interface InviteUserInput {
 
 export async function createUserInvitation(data: InviteUserInput): Promise<string> {
   const result = await userMutation(`${API_URL}/users/invitations`, 'POST', data)
-  return String(result.data.invitation_url)
+  const token = String(result.data.invitation_token ?? '')
+  if (token) {
+    const base = `${window.location.origin}${window.location.pathname}`.replace(/\/$/, '')
+    return `${base}/#/accept-invite?token=${encodeURIComponent(token)}`
+  }
+  if (result.data.invitation_url) return String(result.data.invitation_url)
+  throw new Error('ระบบสร้างคำเชิญแล้ว แต่ไม่พบข้อมูลสำหรับสร้างลิงก์')
 }
 
 export interface InvitationDetails {

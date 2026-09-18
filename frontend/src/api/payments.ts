@@ -80,8 +80,10 @@ export async function getAllocatedPayments(): Promise<Payment[]> {
   // หนึ่ง payment สามารถจัดสรรให้หนี้หลายปีได้ จึงสร้างข้อมูลสรุปแยกต่อปี
   // โดยยังคง payment_id เดิมไว้เพื่อให้นับจำนวนงวดแบบ distinct ได้ถูกต้อง
   const grouped = new Map<string, Payment>()
+  const receivedByPayment = new Map<string, number>()
   for (const row of result.data as AllocationApi[]) {
     const id = String(row.payment_id)
+    receivedByPayment.set(id, Number(row.payment_amount))
     const groupKey = `${id}-${row.tax_year}`
     const payment = grouped.get(groupKey) ?? {
       id,
@@ -101,5 +103,17 @@ export async function getAllocatedPayments(): Promise<Payment[]> {
     payment.amount = payment.allocatedLand + payment.allocatedSign
     grouped.set(groupKey, payment)
   }
-  return [...grouped.values()]
+  const payments = [...grouped.values()]
+  for (const [paymentId, receivedAmount] of receivedByPayment) {
+    const related = payments.filter(payment => payment.id === paymentId)
+    const allocated = related.reduce((sum, payment) => sum + payment.amount, 0)
+    const overpayment = Math.max(0, receivedAmount - allocated)
+    const summaryRow = related.sort((a, b) => Number(b.taxYear ?? 0) - Number(a.taxYear ?? 0))[0]
+    if (summaryRow) {
+      summaryRow.receivedAmount = receivedAmount
+      summaryRow.overpayment = overpayment
+      summaryRow.note = overpayment > .009 ? `ชำระเกิน ส่วนต่าง ${overpayment.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} บาท` : undefined
+    }
+  }
+  return payments
 }

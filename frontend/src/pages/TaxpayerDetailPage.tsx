@@ -248,8 +248,8 @@ export default function TaxpayerDetailPage() {
     })),
     ...tp.payments.filter(p => p.taxYear === selectedYear).map(p => ({
       date: p.date, icon: '💰',
-      title: `รับชำระ ฿${formatCurrency(p.amount)}`,
-      detail: `${p.method === 'transfer' ? 'โอนเงิน' : 'เงินสด'} · ${p.refNo ?? p.receiptNo ?? '-'}`,
+      title: `รับชำระ ฿${formatCurrency(p.receivedAmount ?? p.amount)}`,
+      detail: `${p.method === 'transfer' ? 'โอนเงิน' : 'เงินสด'} · ${p.refNo ?? p.receiptNo ?? '-'}${p.note ? ` · ${p.note}` : ''}`,
       amount: p.amount
     }))
   ].sort((a, b) => b.date.localeCompare(a.date))

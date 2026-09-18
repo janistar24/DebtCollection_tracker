@@ -103,11 +103,13 @@ def _clean_email(value: str | None, required: bool = False) -> str | None:
     return email
 
 
-def _invitation_url(token: str) -> str:
-    frontend_url = os.getenv("FRONTEND_URL", "").strip().rstrip("/")
-    if not frontend_url:
-        raise RuntimeError("ยังไม่ได้กำหนด FRONTEND_URL")
-    return f"{frontend_url}/#/accept-invite?token={token}"
+def _invitation_url(token: str) -> str | None:
+    """Optional server-side URL; the frontend also builds it from its live origin."""
+    frontend_url = (
+        os.getenv("FRONTEND_URL", "").strip()
+        or os.getenv("PUBLIC_APP_URL", "").strip()
+    ).rstrip("/")
+    return f"{frontend_url}/#/accept-invite?token={token}" if frontend_url else None
 
 
 def _invite_token() -> tuple[str, str]:
@@ -366,13 +368,13 @@ def get_users(request: Request):
             media_type="application/json; charset=utf-8"
         )
 
-    except Exception as error:
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("User list loading failed")
         raise HTTPException(
             status_code=500,
-            detail={
-                "message": "ไม่สามารถดึงข้อมูลผู้ใช้งานได้",
-                "error": str(error)
-            }
+            detail="ไม่สามารถดึงข้อมูลผู้ใช้งานได้"
         )
 
 class AdminUserCreate(BaseModel):
@@ -481,7 +483,12 @@ def create_user_invitation(payload: AdminUserInvitation, http_request: Request):
             invitation_id = cursor.fetchone()[0]
         return {
             "success": True,
-            "data": {"invitation_id": invitation_id, "email": email, "invitation_url": url},
+            "data": {
+                "invitation_id": invitation_id,
+                "email": email,
+                "invitation_token": token,
+                "invitation_url": url,
+            },
         }
     except HTTPException:
         raise
@@ -560,22 +567,30 @@ def _save_user_assignment(cursor, user_id: int, role: str, group_code: str | Non
         )
 
 @app.post("/api/users")
-def create_admin_user(request: AdminUserCreate):
-    role = request.role.upper()
+def create_admin_user(payload: AdminUserCreate, http_request: Request):
+    _require_admin_account_management(http_request)
+    role = payload.role.upper()
     if role not in {"OFFICER", "DIRECTOR", "ADMIN"}:
         raise HTTPException(status_code=400, detail="สิทธิ์ผู้ใช้งานไม่ถูกต้อง")
-    if role == "OFFICER" and not request.group_code:
+    if role == "OFFICER" and not payload.group_code:
         raise HTTPException(status_code=400, detail="กรุณาเลือกกลุ่มรับผิดชอบ")
-    if len(request.password) < 12:
+    first_name = payload.first_name.strip()
+    last_name = payload.last_name.strip()
+    username = payload.username.strip()
+    if not first_name or not last_name:
+        raise HTTPException(status_code=400, detail="กรุณาระบุชื่อและนามสกุลให้ครบถ้วน")
+    if not re.fullmatch(r"[A-Za-z0-9._-]{3,64}", username):
+        raise HTTPException(status_code=400, detail="ชื่อผู้ใช้งานต้องเป็นอักษรอังกฤษ ตัวเลข จุด ขีดกลาง หรือขีดล่าง 3–64 ตัว")
+    if len(payload.password) < 12:
         raise HTTPException(status_code=400, detail="รหัสผ่านต้องมีอย่างน้อย 12 ตัวอักษร")
-    email = _clean_email(request.email)
+    email = _clean_email(payload.email)
     try:
         with db.transaction() as cursor:
             employee_code = _internal_employee_code()
             cursor.execute(
                 """SELECT user_id FROM public.users
                    WHERE username=%s OR (%s IS NOT NULL AND LOWER(email)=%s)""",
-                (request.username.strip(), email, email),
+                (username, email, email),
             )
             if cursor.fetchone():
                 raise HTTPException(status_code=409, detail="ชื่อผู้ใช้งานหรืออีเมลถูกใช้งานแล้ว")
@@ -583,27 +598,36 @@ def create_admin_user(request: AdminUserCreate):
                 """INSERT INTO public.users
                    (employee_code,first_name,last_name,role,username,email,password_hash,is_active)
                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING user_id""",
-                (employee_code, request.first_name.strip(), request.last_name.strip(),
-                 role, request.username.strip(), email, password_hash.hash(request.password), request.is_active),
+                (employee_code, first_name, last_name,
+                 role, username, email, password_hash.hash(payload.password), payload.is_active),
             )
             user_id = cursor.fetchone()[0]
-            _save_user_assignment(cursor, user_id, role, request.group_code)
+            _save_user_assignment(cursor, user_id, role, payload.group_code)
         return {"success": True, "data": {"user_id": user_id, "employee_code": employee_code}}
     except HTTPException:
         raise
-    except Exception as error:
-        raise HTTPException(status_code=500, detail={"message": "เพิ่มผู้ใช้งานไม่สำเร็จ", "error": str(error)})
+    except Exception:
+        logger.exception("Admin user creation failed")
+        raise HTTPException(status_code=500, detail="เพิ่มผู้ใช้งานไม่สำเร็จ")
 
 @app.put("/api/users/{user_id}")
-def update_admin_user(user_id: int, request: AdminUserUpdate):
-    role = request.role.upper()
+def update_admin_user(user_id: int, payload: AdminUserUpdate, http_request: Request):
+    _require_admin_account_management(http_request)
+    role = payload.role.upper()
     if role not in {"OFFICER", "DIRECTOR", "ADMIN"}:
         raise HTTPException(status_code=400, detail="สิทธิ์ผู้ใช้งานไม่ถูกต้อง")
-    if role == "OFFICER" and not request.group_code:
+    if role == "OFFICER" and not payload.group_code:
         raise HTTPException(status_code=400, detail="กรุณาเลือกกลุ่มรับผิดชอบ")
-    if request.password and len(request.password) < 12:
+    first_name = payload.first_name.strip()
+    last_name = payload.last_name.strip()
+    username = payload.username.strip()
+    if not first_name or not last_name:
+        raise HTTPException(status_code=400, detail="กรุณาระบุชื่อและนามสกุลให้ครบถ้วน")
+    if not re.fullmatch(r"[A-Za-z0-9._-]{3,64}", username):
+        raise HTTPException(status_code=400, detail="ชื่อผู้ใช้งานต้องเป็นอักษรอังกฤษ ตัวเลข จุด ขีดกลาง หรือขีดล่าง 3–64 ตัว")
+    if payload.password and len(payload.password) < 12:
         raise HTTPException(status_code=400, detail="รหัสผ่านต้องมีอย่างน้อย 12 ตัวอักษร")
-    email = _clean_email(request.email)
+    email = _clean_email(payload.email)
     try:
         with db.transaction() as cursor:
             cursor.execute("SELECT user_id FROM public.users WHERE user_id=%s", (user_id,))
@@ -613,33 +637,32 @@ def update_admin_user(user_id: int, request: AdminUserUpdate):
                 """SELECT user_id FROM public.users
                    WHERE (username=%s OR (%s IS NOT NULL AND LOWER(email)=%s))
                      AND user_id<>%s""",
-                (request.username.strip(), email, email, user_id),
+                (username, email, email, user_id),
             )
             if cursor.fetchone():
                 raise HTTPException(status_code=409, detail="ชื่อผู้ใช้งานหรืออีเมลถูกใช้งานแล้ว")
-            if request.password:
+            if payload.password:
                 cursor.execute(
                     """UPDATE public.users SET first_name=%s,last_name=%s,
                        role=%s,username=%s,email=%s,password_hash=%s,is_active=%s,updated_at=CURRENT_TIMESTAMP
                        WHERE user_id=%s""",
-                    (request.first_name.strip(), request.last_name.strip(), role,
-                     request.username.strip(), email, password_hash.hash(request.password),
-                     request.is_active, user_id),
+                    (first_name, last_name, role, username, email, password_hash.hash(payload.password),
+                     payload.is_active, user_id),
                 )
             else:
                 cursor.execute(
                     """UPDATE public.users SET first_name=%s,last_name=%s,
                        role=%s,username=%s,email=%s,is_active=%s,updated_at=CURRENT_TIMESTAMP
                        WHERE user_id=%s""",
-                    (request.first_name.strip(), request.last_name.strip(), role,
-                     request.username.strip(), email, request.is_active, user_id),
+                    (first_name, last_name, role, username, email, payload.is_active, user_id),
                 )
-            _save_user_assignment(cursor, user_id, role, request.group_code)
+            _save_user_assignment(cursor, user_id, role, payload.group_code)
         return {"success": True}
     except HTTPException:
         raise
-    except Exception as error:
-        raise HTTPException(status_code=500, detail={"message": "แก้ไขผู้ใช้งานไม่สำเร็จ", "error": str(error)})
+    except Exception:
+        logger.exception("Admin user update failed")
+        raise HTTPException(status_code=500, detail="แก้ไขผู้ใช้งานไม่สำเร็จ")
 
 @app.put("/api/users/{user_id}/active")
 def set_admin_user_active(user_id: int, is_active: bool, http_request: Request):
@@ -982,8 +1005,8 @@ def create_complete_payment(request: CompletePaymentCreate, http_request: Reques
     allocated_total = sum(item.allocated_amount for item in request.allocations)
     if any(item.allocated_amount <= 0 for item in request.allocations):
         raise HTTPException(status_code=400, detail="ยอดจัดสรรแต่ละรายการต้องมากกว่า 0")
-    if abs(allocated_total - request.payment_amount) > 0.009:
-        raise HTTPException(status_code=400, detail="ผลรวมยอดจัดสรรต้องเท่ากับยอดชำระ")
+    if allocated_total - request.payment_amount > 0.009:
+        raise HTTPException(status_code=400, detail="ผลรวมยอดจัดสรรต้องไม่เกินยอดเงินที่ได้รับ")
 
     assessment_ids = [item.assessment_id for item in request.allocations]
     if len(assessment_ids) != len(set(assessment_ids)):
@@ -1019,6 +1042,31 @@ def create_complete_payment(request: CompletePaymentCreate, http_request: Reques
                 raise HTTPException(status_code=404, detail=f"ไม่พบข้อมูลการประเมินภาษีรหัส {missing[0]}")
             if len({row[4] for row in assessment_rows.values()}) != 1:
                 raise HTTPException(status_code=400, detail="รายการภาษีที่จัดสรรต้องเป็นของผู้เสียภาษีรายเดียวกัน")
+            taxpayer_id = next(iter(assessment_rows.values()))[4]
+            cursor.execute(
+                """SELECT COALESCE(SUM(GREATEST(
+                           ta.assessed_amount - COALESCE(paid.amount, 0), 0
+                       )), 0)
+                   FROM public.tax_assessments ta
+                   JOIN public.taxpayer_year_records tyr
+                     ON tyr.year_record_id=ta.year_record_id
+                   LEFT JOIN (
+                       SELECT assessment_id,SUM(allocated_amount) AS amount
+                       FROM public.payment_allocations GROUP BY assessment_id
+                   ) paid ON paid.assessment_id=ta.assessment_id
+                   WHERE tyr.taxpayer_id=%s""",
+                (taxpayer_id,),
+            )
+            total_outstanding = float(cursor.fetchone()[0])
+            unallocated_received = request.payment_amount - allocated_total
+            if unallocated_received > 0.009 and (
+                request.payment_amount - total_outstanding <= 0.009
+                or abs(allocated_total - total_outstanding) > 0.009
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="ยอดเงินยังสามารถนำไปตัดหนี้คงเหลือได้ กรุณาจัดสรรยอดให้ครบก่อนบันทึกส่วนชำระเกิน",
+                )
             for item in request.allocations:
                 row = assessment_rows[item.assessment_id]
                 remaining = float(row[2]) - float(row[3])
@@ -1056,7 +1104,15 @@ def create_complete_payment(request: CompletePaymentCreate, http_request: Reques
         return {
             "success": True,
             "message": "บันทึกการชำระและจัดสรรยอดเรียบร้อยแล้ว",
-            "data": {"payment_id": payment_id}
+            "data": {
+                "payment_id": payment_id,
+                "allocated_total": allocated_total,
+                "overpayment_amount": max(request.payment_amount - allocated_total, 0),
+                "note": (
+                    f"ชำระเกิน ส่วนต่าง {request.payment_amount - allocated_total:,.2f} บาท"
+                    if request.payment_amount - allocated_total > 0.009 else None
+                ),
+            }
         }
     except HTTPException:
         raise
