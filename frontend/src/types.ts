@@ -65,6 +65,7 @@ export interface Taxpayer {
   id: string
   ownerCode: string
   type: TaxpayerType
+  title?: string
   firstName: string
   lastName: string
   companyName?: string

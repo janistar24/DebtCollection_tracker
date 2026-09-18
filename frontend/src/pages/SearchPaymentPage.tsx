@@ -617,7 +617,7 @@ export default function SearchPaymentPage() {
                 <div style={{ fontSize: 14, fontWeight: 700, color: '#2d2545', marginBottom: 9 }}>พบยอดตรงหรือใกล้เคียงจากกลุ่มอื่น {crossGroupMatches.length} รายการ</div>
                 <div style={{ display: 'grid', gap: 8 }}>
                   {crossGroupMatches.map((match, index) => {
-                    const name = match.taxpayer_type === 'COMPANY' ? match.company_name : `${match.first_name ?? ''} ${match.last_name ?? ''}`.trim()
+                    const name = match.taxpayer_type === 'COMPANY' ? match.company_name : `${match.title ?? ''}${match.first_name ?? ''} ${match.last_name ?? ''}`.trim()
                     const exact = Math.abs(match.difference) < .01
                     const typeLabel = match.match_type === 'LAND_BUILDING' ? 'ภาษีที่ดินและสิ่งปลูกสร้าง' : match.match_type === 'SIGN' ? 'ภาษีป้าย' : 'ยอดรวมทั้งสองประเภท'
                     return <div key={`${match.taxpayer_id}-${match.tax_year}-${match.match_type}-${index}`} style={{ display: 'grid', gridTemplateColumns: 'minmax(180px,1fr) auto auto', gap: 12, alignItems: 'center', padding: '11px 13px', borderRadius: 11, background: 'rgba(240,236,251,.5)', border: '1px solid rgba(180,165,230,.22)' }}>

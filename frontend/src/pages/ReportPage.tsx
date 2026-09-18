@@ -74,7 +74,7 @@ export default function ReportPage() {
       {isDirector && <Filter label="กลุ่มผู้รับผิดชอบ" value={groupFilter} setValue={setGroupFilter} options={[['all','ทุกกลุ่ม'],...GROUPS.map(g => [g,`กลุ่ม ${g}`])]} />}
       <Filter label="สถานะ" value={statusFilter} setValue={setStatusFilter} options={[['all','ทุกสถานะ'],['unpaid','ยังไม่ชำระ'],['partial','ชำระบางส่วน'],['paid','ชำระครบ']]} />
       <Filter label="ประเภทภาษี" value={taxTypeFilter} setValue={setTaxTypeFilter} options={[['all','ทุกประเภท'],['land','ที่ดินและสิ่งปลูกสร้าง'],['sign','ภาษีป้าย']]} />
-      <Filter label="ประเภทบุคคล" value={personTypeFilter} setValue={setPersonTypeFilter} options={[['all','ทุกประเภท'],['individual','บุคคลธรรมดา'],['company','นิติบุคคลหรือบริษัท']]} />
+      <Filter label="ประเภทผู้เสียภาษี" value={personTypeFilter} setValue={setPersonTypeFilter} options={[['all','ทุกประเภท'],['individual','บุคคลธรรมดา'],['company','หน่วยงาน / นิติบุคคล']]} />
       <button className="btn-primary" onClick={() => window.print()} style={{ marginLeft: 'auto', fontSize: 13 }}>🖨 พิมพ์รายงานหรือบันทึกเป็นไฟล์ PDF</button>
     </div>
 
@@ -153,7 +153,7 @@ function Kpi({label,value,color}:{label:string,value:string,color:string}) { ret
 
 // ฟังก์ชันด้านล่างคำนวณจาก Taxpayer ที่ AppContext โหลดจาก Backend API เท่านั้น
 function getTaxpayerName(tp: Taxpayer) {
-  return tp.type === 'company' ? (tp.companyName ?? '') : `${tp.firstName} ${tp.lastName}`.trim()
+  return tp.type === 'company' ? (tp.companyName ?? '') : `${tp.title ?? ''}${tp.firstName} ${tp.lastName}`.trim()
 }
 
 function paymentsForYear(tp: Taxpayer, taxYear: number) {

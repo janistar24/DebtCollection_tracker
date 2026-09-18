@@ -4,7 +4,7 @@ import type { FollowUp, Taxpayer } from '../types'
 export const CURRENT_YEAR = new Date().getFullYear() + 543
 
 export const getTaxpayerName = (tp: Taxpayer) => tp.type === 'company'
-  ? (tp.companyName ?? '') : `${tp.firstName} ${tp.lastName}`.trim()
+  ? (tp.companyName ?? '') : `${tp.title ?? ''}${tp.firstName} ${tp.lastName}`.trim()
 
 export const getAssessment = (tp: Taxpayer, year: number) =>
   tp.assessments.find(item => item.year === year)

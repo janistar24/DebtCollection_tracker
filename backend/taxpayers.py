@@ -13,6 +13,7 @@ class Taxpayers:
                 t.taxpayer_id,
                 t.owner_code,
                 t.taxpayer_type,
+                t.title,
                 t.first_name,
                 t.last_name,
                 t.company_name,
@@ -67,6 +68,7 @@ class Taxpayers:
                 t.taxpayer_id,
                 t.owner_code,
                 t.taxpayer_type,
+                t.title,
                 t.first_name,
                 t.last_name,
                 t.company_name,
@@ -101,7 +103,7 @@ class Taxpayers:
         return taxpayers
     
     # CREATE TAXPAYER
-    def create(self,taxpayer_type,owner_code,first_name,last_name,company_name,phone,address,group_code,is_active=True):
+    def create(self,taxpayer_type,owner_code,title,first_name,last_name,company_name,phone,address,group_code,is_active=True):
         # บุคคลธรรมดา
         if taxpayer_type == "INDIVIDUAL":
             if first_name is None or last_name is None:
@@ -128,11 +130,12 @@ class Taxpayers:
                 return {
                     "Is Error": True,
                     "Error Message":
-                        "นิติบุคคลหรือบริษัทต้องมีชื่อบริษัท"
+                        "หน่วยงานหรือนิติบุคคลต้องมีชื่อ"
                 }
 
             # บริษัทไม่มี Owner Code
             owner_code = None
+            title = None
 
             # บริษัทอยู่กลุ่มนี้เสมอ
             group_code = "ว-ฮ และบริษัท"
@@ -154,6 +157,7 @@ class Taxpayers:
             INSERT INTO public.taxpayers (
                 taxpayer_type,
                 owner_code,
+                title,
                 first_name,
                 last_name,
                 company_name,
@@ -171,6 +175,7 @@ class Taxpayers:
                 %s,
                 %s,
                 %s,
+                %s,
                 %s
             )
             RETURNING taxpayer_id
@@ -178,6 +183,7 @@ class Taxpayers:
             (
                 taxpayer_type,
                 owner_code,
+                title,
                 first_name,
                 last_name,
                 company_name,
@@ -204,6 +210,7 @@ class Taxpayers:
         taxpayer_id,
         taxpayer_type,
         owner_code,
+        title,
         first_name,
         last_name,
         company_name,
@@ -264,10 +271,11 @@ class Taxpayers:
                 return {
                     "Is Error": True,
                     "Error Message":
-                        "นิติบุคคลหรือบริษัทต้องมีชื่อบริษัท"
+                        "หน่วยงานหรือนิติบุคคลต้องมีชื่อ"
                 }
 
             owner_code = None
+            title = None
             first_name = None
             last_name = None
             group_code = "ว-ฮ และบริษัท"
@@ -287,6 +295,7 @@ class Taxpayers:
             SET
                 taxpayer_type = %s,
                 owner_code = %s,
+                title = %s,
                 first_name = %s,
                 last_name = %s,
                 company_name = %s,
@@ -301,6 +310,7 @@ class Taxpayers:
             (
                 taxpayer_type,
                 owner_code,
+                title,
                 first_name,
                 last_name,
                 company_name,

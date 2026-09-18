@@ -35,7 +35,7 @@ function exportExcel(rows: import('../types').Taxpayer[], year: number, group: s
     const sign = a?.signAmount ?? 0
     const dland = land - (a?.prevLandAmount ?? 0)
     const dsign = sign - (a?.prevSignAmount ?? 0)
-    const name = tp.type === 'company' ? (tp.companyName ?? '') : `${tp.firstName} ${tp.lastName}`
+    const name = tp.type === 'company' ? (tp.companyName ?? '') : `${tp.title ?? ''}${tp.firstName} ${tp.lastName}`
     return [i + 1, name, tp.ownerCode, land.toFixed(2), dland.toFixed(2), sign.toFixed(2), dsign.toFixed(2), tp.notes ?? '']
   })
   const csvRows = [header, ...body].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))
@@ -835,9 +835,9 @@ const handleInlineAdd = async () => {
         </select>
 
         <select className="input-field" style={{ width: 160 }} value={personTypeFilter} onChange={e => setPersonTypeFilter(e.target.value)}>
-          <option value="all">ทุกประเภทบุคคล</option>
+          <option value="all">ทุกประเภทผู้เสียภาษี</option>
           <option value="individual">บุคคลธรรมดา</option>
-          <option value="company">นิติบุคคลหรือบริษัท</option>
+          <option value="company">หน่วยงาน / นิติบุคคล</option>
         </select>
 
         <span style={{ fontSize: 13, color: '#a89cc8' }}>{filtered.length} รายการ</span>

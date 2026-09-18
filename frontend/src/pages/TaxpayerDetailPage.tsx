@@ -16,6 +16,7 @@ import { createFollowUpLog } from '../api/follow_up_logs'
 import PaymentForm from '../components/PaymentForm'
 import BuddhistDateInput from '../components/BuddhistDateInput'
 import { createHistoricalDebt } from '../api/debt_management'
+import { isStandardTaxpayerTitle, OTHER_TITLE, TAXPAYER_TITLES } from '../data/taxpayerTitles'
 
 // Extract short keyword tags from a freeform note string
 function extractTags(tp: Taxpayer): { label: string; year: number; note: string }[] {
@@ -373,6 +374,10 @@ export default function TaxpayerDetailPage() {
   async function saveMaster() {
     if (!editing) return
     if (editing.type === 'individual') {
+      if (!editing.title || editing.title === OTHER_TITLE) {
+        alert('กรุณาเลือกหรือระบุคำนำหน้า')
+        return
+      }
       const calculatedCode = generateOwnerCode(editing.firstName, editing.lastName)
       const otherOwnerCodes = taxpayers
         .filter(other => other.id !== editing.id)
@@ -392,7 +397,7 @@ export default function TaxpayerDetailPage() {
     }
     try {
       setMasterSaving(true)
-      await updateTaxpayerMaster(Number(editing.id), { taxpayer_type: editing.type === 'company' ? 'COMPANY' : 'INDIVIDUAL', owner_code: editing.type === 'individual' ? editing.ownerCode : null, first_name: editing.type === 'individual' ? editing.firstName : null, last_name: editing.type === 'individual' ? editing.lastName : null, company_name: editing.type === 'company' ? editing.companyName ?? null : null, phone: editing.phone || null, address: editing.address || null, group_code: editing.group, is_active: editing.active })
+      await updateTaxpayerMaster(Number(editing.id), { taxpayer_type: editing.type === 'company' ? 'COMPANY' : 'INDIVIDUAL', owner_code: editing.type === 'individual' ? editing.ownerCode : null, title: editing.type === 'individual' ? editing.title ?? null : null, first_name: editing.type === 'individual' ? editing.firstName : null, last_name: editing.type === 'individual' ? editing.lastName : null, company_name: editing.type === 'company' ? editing.companyName ?? null : null, phone: editing.phone || null, address: editing.address || null, group_code: editing.group, is_active: editing.active })
       updateTaxpayer({ ...editing }); setEditing(null); setSearchParams({}, { replace: true }); alert('บันทึกข้อมูลผู้เสียภาษีเรียบร้อยแล้ว')
     } catch (error) { alert(error instanceof Error ? error.message : 'บันทึกไม่สำเร็จ') }
     finally { setMasterSaving(false) }
@@ -543,7 +548,7 @@ export default function TaxpayerDetailPage() {
                 💰 บันทึกการชำระ
               </button>
               <button className="btn-secondary" style={{ width: '100%' }} onClick={() => setShowHistoricalDebtModal(true)}>
-                📚 เพิ่มยอดหนี้ยกมาจากปีก่อน
+                📚 เพิ่มประวัติหนี้ค้างปีก่อน
               </button>
             </div>
           </div>}
@@ -563,9 +568,9 @@ export default function TaxpayerDetailPage() {
         </div>
       </div>
 
-      {canWrite && showHistoricalDebtModal && <Modal title="เพิ่มยอดหนี้ยกมาจากปีก่อน" onClose={() => !historicalSaving && setShowHistoricalDebtModal(false)} maxWidth="560px">
+      {canWrite && showHistoricalDebtModal && <Modal title="เพิ่มประวัติหนี้ค้างปีก่อน" onClose={() => !historicalSaving && setShowHistoricalDebtModal(false)} maxWidth="560px">
         <div style={{ padding: '11px 13px', borderRadius: 10, background: '#fff8e6', color: '#795716', fontSize: 12.5, lineHeight: 1.6, marginBottom: 16 }}>
-          ใช้กรณีมีหลักฐานยอดค้างจากปีก่อน แต่ไม่มีทะเบียนหรือรายละเอียดรายการของปีนั้นครบถ้วน ยอดนี้จะถูกรวมในการติดตามและสามารถตัดชำระเป็นงวดได้
+          ใช้สำหรับเริ่มต้นระบบเมื่อมีลูกหนี้เก่าที่ยังค้างชำระ แต่ไม่มีข้อมูลทะเบียนของปีนั้นครบถ้วน ระบบจะสร้างประวัติปีภาษีและยอดค้างให้ เพื่อนำไปติดตามและตัดชำระเป็นงวดต่อได้
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
           <div><label style={LBL}>ปีภาษี (พ.ศ.) *</label><input className="input-field" type="number" min="2400" max={CURRENT_YEAR - 1} value={historicalYear} onChange={e => setHistoricalYear(e.target.value)} /></div>
@@ -584,10 +589,10 @@ export default function TaxpayerDetailPage() {
         </div>
         <form onSubmit={e => { e.preventDefault(); void saveMaster() }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-            <div><label style={LBL}>ประเภทผู้เสียภาษี</label><input className="input-field" value={editing.type === 'company' ? 'นิติบุคคลหรือบริษัท' : 'บุคคลธรรมดา'} disabled /></div>
+            <div><label style={LBL}>ประเภทผู้เสียภาษี</label><input className="input-field" value={editing.type === 'company' ? 'หน่วยงาน / นิติบุคคล' : 'บุคคลธรรมดา'} disabled /></div>
             {editing.type === 'individual' && <div><label style={LBL}>รหัสเจ้าของทรัพย์สิน (สร้างอัตโนมัติ)</label><input className="input-field" value={editing.ownerCode} readOnly style={{ background: 'rgba(240,236,251,.55)', color: '#7055ae', fontWeight: 600 }} /><div style={{ fontSize: 10, color: '#a89cc8', marginTop: 4 }}>รหัสจะเปลี่ยนอัตโนมัติเมื่อแก้ชื่อหรือนามสกุล</div></div>}
-            {editing.type === 'individual' ? <><div><label style={LBL}>ชื่อ *</label><input className="input-field" value={editing.firstName} required onChange={e => updateEditingName('firstName', e.target.value)}/></div><div><label style={LBL}>นามสกุล *</label><input className="input-field" value={editing.lastName} required onChange={e => updateEditingName('lastName', e.target.value)}/></div></> : <div style={{gridColumn:'1/-1'}}><label style={LBL}>ชื่อบริษัท / นิติบุคคล *</label><input className="input-field" value={editing.companyName ?? ''} required onChange={e => setEditing({...editing, companyName:e.target.value})}/></div>}
-            <div><label style={LBL}>หมายเลขโทรศัพท์ศัพท์ *</label><input className="input-field" value={editing.phone} required onChange={e => setEditing({...editing, phone:e.target.value})}/></div>
+            {editing.type === 'individual' ? <><div><label style={LBL}>คำนำหน้า *</label><select className="input-field" value={isStandardTaxpayerTitle(editing.title) ? editing.title : editing.title ? OTHER_TITLE : ''} required onChange={e => setEditing({...editing, title:e.target.value})}><option value="">เลือกคำนำหน้า</option>{TAXPAYER_TITLES.map(item => <option key={item} value={item}>{item}</option>)}<option value={OTHER_TITLE}>อื่น ๆ (โปรดระบุ)</option></select>{editing.title && !isStandardTaxpayerTitle(editing.title) && <input className="input-field" style={{marginTop:8}} placeholder="ระบุคำนำหน้า" required value={editing.title === OTHER_TITLE ? '' : editing.title} onChange={e => setEditing({...editing, title:e.target.value || OTHER_TITLE})}/>}</div><div><label style={LBL}>ชื่อ *</label><input className="input-field" value={editing.firstName} required onChange={e => updateEditingName('firstName', e.target.value)}/></div><div><label style={LBL}>นามสกุล *</label><input className="input-field" value={editing.lastName} required onChange={e => updateEditingName('lastName', e.target.value)}/></div></> : <div style={{gridColumn:'1/-1'}}><label style={LBL}>ชื่อหน่วยงาน / นิติบุคคล *</label><input className="input-field" value={editing.companyName ?? ''} required onChange={e => setEditing({...editing, companyName:e.target.value})}/><div style={{fontSize:11,color:'#a89cc8',marginTop:5}}>กรอกชื่อเต็มรวมคำนำหน้าหน่วยงาน</div></div>}
+            <div><label style={LBL}>หมายเลขโทรศัพท์ *</label><input className="input-field" value={editing.phone} required onChange={e => setEditing({...editing, phone:e.target.value})}/></div>
             <div><label style={LBL}>กลุ่มผู้รับผิดชอบ *</label><select className="input-field" value={editing.group} onChange={e => setEditing({...editing, group:e.target.value as Taxpayer['group']})}><option>ก-น</option><option>บ-ล</option><option>ส-ศ</option><option>ว-ฮ และบริษัท</option></select></div>
             <div style={{gridColumn:'1/-1'}}><label style={LBL}>ที่อยู่ *</label><textarea className="input-field" rows={3} value={editing.address} required onChange={e => setEditing({...editing, address:e.target.value})}/></div>
           </div>

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useApp } from '../context/AppContext'
 import type { Taxpayer } from '../types'
 
-const nameOf = (tp: Taxpayer) => tp.type === 'company' ? tp.companyName ?? '' : `${tp.firstName} ${tp.lastName}`
+const nameOf = (tp: Taxpayer) => tp.type === 'company' ? tp.companyName ?? '' : `${tp.title ?? ''}${tp.firstName} ${tp.lastName}`
 
 export default function ManageTaxpayersPage() {
   const { taxpayers, currentUser, dataLoading, dataError, refreshData } = useApp()
@@ -35,7 +35,7 @@ export default function ManageTaxpayersPage() {
     </div>
     <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
       <input className="input-field" placeholder="ค้นหาจากชื่อ รหัสเจ้าของทรัพย์สิน หรือหมายเลขโทรศัพท์" value={search} onChange={e => setSearch(e.target.value)} style={{ maxWidth: 380 }} />
-      <select className="input-field" value={type} onChange={e => setType(e.target.value)} style={{ width: 170 }}><option value="all">ทุกประเภทบุคคล</option><option value="individual">บุคคลธรรมดา</option><option value="company">นิติบุคคล</option></select>
+      <select className="input-field" value={type} onChange={e => setType(e.target.value)} style={{ width: 190 }}><option value="all">ทุกประเภทผู้เสียภาษี</option><option value="individual">บุคคลธรรมดา</option><option value="company">หน่วยงาน / นิติบุคคล</option></select>
       <span style={{ alignSelf: 'center', color: '#8873b5', fontSize: 12 }}>{rows.length} ราย</span>
     </div>
     {dataLoading && taxpayers.length === 0 ? (
@@ -48,7 +48,7 @@ export default function ManageTaxpayersPage() {
     ) : <>
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(285px,1fr))', gap: 14 }}>
       {visibleRows.map(tp => <div key={tp.id} className="glass-card" style={{ padding: 18 }}>
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}><div style={{ width: 42, height: 42, borderRadius: 13, background: '#eee8fb', display: 'grid', placeItems: 'center', fontSize: 19 }}>{tp.type === 'company' ? '🏢' : '👤'}</div><div><div style={{ fontWeight: 700 }}>{nameOf(tp)}</div><div style={{ fontSize: 11, color: '#a89cc8' }}>{tp.ownerCode || 'นิติบุคคล'} · กลุ่ม {tp.group}</div></div></div>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}><div style={{ width: 42, height: 42, borderRadius: 13, background: '#eee8fb', display: 'grid', placeItems: 'center', fontSize: 19 }}>{tp.type === 'company' ? '🏢' : '👤'}</div><div><div style={{ fontWeight: 700 }}>{nameOf(tp)}</div><div style={{ fontSize: 11, color: '#a89cc8' }}>{tp.ownerCode || 'หน่วยงาน / นิติบุคคล'} · กลุ่ม {tp.group}</div></div></div>
         <div style={{ marginTop: 13, color: '#6b5b95', fontSize: 12, lineHeight: 1.8 }}>☎ {tp.phone || '-'}<br/>⌂ {tp.address || '-'}</div>
         <div style={{ display: 'flex', gap: 6, marginTop: 14, paddingTop: 12, borderTop: '1px solid rgba(200,190,240,.25)' }}>
           <button className="btn-secondary" style={{ flex: 1, fontSize: 11 }} onClick={() => navigate(`/taxpayers/manage/${tp.id}`)}>ตรวจสอบรายละเอียด</button>

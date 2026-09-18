@@ -24,6 +24,7 @@ export interface CrossGroupMatch {
   taxpayer_id: number
   owner_code: string
   taxpayer_type: 'INDIVIDUAL' | 'COMPANY'
+  title: string | null
   first_name: string | null
   last_name: string | null
   company_name: string | null

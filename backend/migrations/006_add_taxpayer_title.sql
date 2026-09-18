@@ -1,0 +1,6 @@
+BEGIN;
+
+ALTER TABLE public.taxpayers
+ADD COLUMN IF NOT EXISTS title VARCHAR(50);
+
+COMMIT;

@@ -1,10 +1,12 @@
 import type { Taxpayer, Group } from '../types'
 import { API_URL } from './config'
+import { splitTaxpayerTitle } from '../data/taxpayerTitles'
 
 interface TaxpayerApi {
   taxpayer_id: number
   owner_code: string | null
   taxpayer_type: 'INDIVIDUAL' | 'COMPANY'
+  title: string | null
   first_name: string | null
   last_name: string | null
   company_name: string | null
@@ -38,7 +40,11 @@ export async function getTaxpayers(): Promise<Taxpayer[]> {
     throw new Error('API ไม่สามารถส่งข้อมูลผู้เสียภาษีได้')
   }
 
-  return result.data.map((taxpayer) => ({
+  return result.data.map((taxpayer) => {
+    const personName = taxpayer.title
+      ? { title: taxpayer.title, firstName: taxpayer.first_name ?? '' }
+      : splitTaxpayerTitle(taxpayer.first_name)
+    return ({
     id: String(taxpayer.taxpayer_id),
 
     ownerCode: taxpayer.owner_code ?? '',
@@ -48,7 +54,8 @@ export async function getTaxpayers(): Promise<Taxpayer[]> {
         ? 'company'
         : 'individual',
 
-    firstName: taxpayer.first_name ?? '',
+    title: personName.title,
+    firstName: personName.firstName,
     lastName: taxpayer.last_name ?? '',
     companyName: taxpayer.company_name ?? undefined,
 
@@ -68,12 +75,13 @@ export async function getTaxpayers(): Promise<Taxpayer[]> {
     notes: '',
 
     active: taxpayer.is_active,
-  }))
+  })})
 }
 
 export interface TaxpayerCreate {
   taxpayer_type: 'INDIVIDUAL' | 'COMPANY'
   owner_code: string | null
+  title: string | null
   first_name: string | null
   last_name: string | null
   company_name: string | null

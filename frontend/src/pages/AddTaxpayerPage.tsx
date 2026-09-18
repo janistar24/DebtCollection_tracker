@@ -4,12 +4,15 @@ import { useApp } from '../context/AppContext'
 import { generateOwnerCode, isDuplicateCode } from '../utils/ownerCode'
 import type { Taxpayer } from '../types'
 import { createCompleteTaxpayer } from '../api/taxpayers'
+import { OTHER_TITLE, TAXPAYER_TITLES } from '../data/taxpayerTitles'
 
 export default function AddTaxpayerPage() {
   const { currentUser, taxpayers, selectedYear, addTaxpayer } = useApp()
   const navigate = useNavigate()
 
   const [tpType, setTpType] = useState<'individual' | 'company'>('individual')
+  const [title, setTitle] = useState('')
+  const [customTitle, setCustomTitle] = useState('')
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
   const [companyName, setCompanyName] = useState('')
@@ -55,10 +58,12 @@ export default function AddTaxpayerPage() {
 
   const validate = () => {
     const errs: Record<string, string> = {}
+    if (tpType === 'individual' && !title) errs.title = 'กรุณาเลือกคำนำหน้า'
+    if (tpType === 'individual' && title === OTHER_TITLE && !customTitle.trim()) errs.title = 'กรุณาระบุคำนำหน้า'
     if (tpType === 'individual' && !firstName) errs.firstName = 'กรุณากรอกชื่อ'
     if (tpType === 'individual' && !lastName) errs.lastName = 'กรุณากรอกนามสกุล'
     if (tpType === 'individual' && !generatedCode) errs.code = 'ไม่สามารถสร้างรหัสได้ กรุณาตรวจสอบชื่อ-นามสกุล'
-    if (tpType === 'company' && !companyName) errs.companyName = 'กรุณากรอกชื่อบริษัท'
+    if (tpType === 'company' && !companyName) errs.companyName = 'กรุณากรอกชื่อหน่วยงานหรือนิติบุคคล'
     if (!phone) errs.phone = 'กรุณากรอกหมายเลขโทรศัพท์'
     if (!address) errs.address = 'กรุณากรอกที่อยู่'
     if (!landAmount && !signAmount) errs.tax = 'กรุณากรอกยอดภาษีอย่างน้อยหนึ่งประเภท'
@@ -104,6 +109,11 @@ const handleSubmit = async (
 
         owner_code:
           ownerCode,
+
+        title:
+          tpType === 'individual'
+            ? (title === OTHER_TITLE ? customTitle.trim() : title)
+            : null,
 
         first_name:
           tpType === 'individual'
@@ -152,6 +162,7 @@ const handleSubmit = async (
       id: String(result.data.taxpayer_id),
       ownerCode: ownerCode ?? '',
       type: tpType,
+      title: tpType === 'individual' ? (title === OTHER_TITLE ? customTitle.trim() : title) : undefined,
       firstName: tpType === 'individual' ? firstName : '',
       lastName: tpType === 'individual' ? lastName : '',
       companyName: tpType === 'company' ? companyName : undefined,
@@ -230,8 +241,8 @@ const handleSubmit = async (
             <div>
               <label style={LBL}>ประเภทผู้เสียภาษี *</label>
               <div style={{ display: 'flex', gap: 8 }}>
-                {[['individual', '👤 บุคคลธรรมดา'], ['company', '🏢 นิติบุคคลหรือบริษัท']].map(([v, l]) => (
-                  <button key={v} type="button" onClick={() => { setTpType(v as 'individual' | 'company'); setFirstName(''); setLastName(''); setCompanyName('') }} style={{
+                {[['individual', '👤 บุคคลธรรมดา'], ['company', '🏢 หน่วยงาน / นิติบุคคล']].map(([v, l]) => (
+                  <button key={v} type="button" onClick={() => { setTpType(v as 'individual' | 'company'); setTitle(''); setCustomTitle(''); setFirstName(''); setLastName(''); setCompanyName(''); setErrors({}) }} style={{
                     padding: '10px 18px', borderRadius: 10, cursor: 'pointer', fontFamily: "'Sarabun',sans-serif", fontSize: 13,
                     border: tpType === v ? '1.5px solid #7c5cbf' : '1px solid rgba(180,165,230,0.3)',
                     background: tpType === v ? 'rgba(124,92,191,0.1)' : 'transparent',
@@ -243,9 +254,19 @@ const handleSubmit = async (
 
             {/* Name fields */}
             {tpType === 'individual' ? (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '170px 1fr 1fr', gap: 16, alignItems: 'start' }}>
                 <div>
-                  <label style={LBL}>ชื่อ (ไม่ต้องมีคำนำหน้า) *</label>
+                  <label style={LBL}>คำนำหน้า *</label>
+                  <select className="input-field" value={title} onChange={e => { setTitle(e.target.value); setCustomTitle(''); setErrors(prev => ({ ...prev, title: '' })) }}>
+                    <option value="">เลือกคำนำหน้า</option>
+                    {TAXPAYER_TITLES.map(item => <option key={item} value={item}>{item}</option>)}
+                    <option value={OTHER_TITLE}>อื่น ๆ (โปรดระบุ)</option>
+                  </select>
+                  {title === OTHER_TITLE && <input className="input-field" style={{ marginTop: 8 }} placeholder="ระบุคำนำหน้า" value={customTitle} onChange={e => { setCustomTitle(e.target.value); setErrors(prev => ({ ...prev, title: '' })) }} />}
+                  {err('title')}
+                </div>
+                <div>
+                  <label style={LBL}>ชื่อ *</label>
                   <input className="input-field" placeholder="เช่น กรกน" value={firstName}
                     onChange={e => { setFirstName(e.target.value); setErrors(prev => ({ ...prev, firstName: '', code: '' })) }} />
                   {err('firstName')}
@@ -259,9 +280,10 @@ const handleSubmit = async (
               </div>
             ) : (
               <div>
-                <label style={LBL}>ชื่อบริษัท / นิติบุคคล *</label>
-                <input className="input-field" placeholder="ชื่อบริษัท จำกัด / ห้างหุ้นส่วน" value={companyName}
+                <label style={LBL}>ชื่อหน่วยงาน / นิติบุคคล *</label>
+                <input className="input-field" placeholder="กรอกชื่อเต็ม เช่น ธนาคารกรุงไทย จำกัด (มหาชน)" value={companyName}
                   onChange={e => { setCompanyName(e.target.value); setErrors(prev => ({ ...prev, companyName: '' })) }} />
+                <div style={{ fontSize: 11, color: '#a89cc8', marginTop: 5 }}>กรอกคำนำหน้ารวมกับชื่อหน่วยงาน เช่น บริษัท ธนาคาร สำนักงาน องค์การ สมาคม มูลนิธิ หรือวัด</div>
                 {err('companyName')}
               </div>
             )}
@@ -303,7 +325,7 @@ const handleSubmit = async (
             {/* Contact info */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 16 }}>
               <div>
-                <label style={LBL}>หมายเลขโทรศัพท์ศัพท์ *</label>
+                <label style={LBL}>หมายเลขโทรศัพท์ *</label>
                 <input className="input-field" placeholder="08x-xxx-xxxx" value={phone}
                   onChange={e => { setPhone(e.target.value); setErrors(prev => ({ ...prev, phone: '' })) }} />
                 {err('phone')}

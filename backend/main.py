@@ -85,9 +85,13 @@ login_failures_lock = Lock()
 
 @app.on_event("startup")
 def ensure_user_invitation_schema() -> None:
-    migration_path = os.path.join(os.path.dirname(__file__), "migrations", "005_add_user_email_invitations.sql")
-    with open(migration_path, "r", encoding="utf-8") as migration_file:
-        db.execute(migration_file.read())
+    for migration_name in (
+        "005_add_user_email_invitations.sql",
+        "006_add_taxpayer_title.sql",
+    ):
+        migration_path = os.path.join(os.path.dirname(__file__), "migrations", migration_name)
+        with open(migration_path, "r", encoding="utf-8") as migration_file:
+            db.execute(migration_file.read())
 
 
 def _clean_email(value: str | None, required: bool = False) -> str | None:
@@ -1115,6 +1119,7 @@ def login(request: LoginRequest, http_request: Request):
 class TaxpayerCreate(BaseModel):
     taxpayer_type: str
     owner_code: str | None = None
+    title: str | None = None
     first_name: str | None = None
     last_name: str | None = None
     company_name: str | None = None
@@ -1217,7 +1222,7 @@ def get_cross_group_payment_matches(amount: float, tax_year: int, request: Reque
     tolerance = max(amount * 0.1, 5)
     data, columns = db.fetch(
         """WITH assessment_remaining AS (
-             SELECT t.taxpayer_id,t.owner_code,t.taxpayer_type,t.first_name,t.last_name,t.company_name,
+             SELECT t.taxpayer_id,t.owner_code,t.taxpayer_type,t.title,t.first_name,t.last_name,t.company_name,
                     t.group_code,tyr.tax_year,ta.tax_type,ta.assessed_amount,
                     GREATEST(ta.assessed_amount-COALESCE(SUM(pa.allocated_amount),0),0) AS remaining
              FROM public.tax_assessments ta
@@ -1226,18 +1231,18 @@ def get_cross_group_payment_matches(amount: float, tax_year: int, request: Reque
              LEFT JOIN public.payment_allocations pa ON pa.assessment_id=ta.assessment_id
              WHERE tyr.is_included=TRUE AND t.is_active=TRUE
                AND (%s::text IS NULL OR t.group_code<>%s::text)
-             GROUP BY t.taxpayer_id,t.owner_code,t.taxpayer_type,t.first_name,t.last_name,t.company_name,
+             GROUP BY t.taxpayer_id,t.owner_code,t.taxpayer_type,t.title,t.first_name,t.last_name,t.company_name,
                       t.group_code,tyr.tax_year,ta.tax_type,ta.assessed_amount
            ), candidates AS (
              SELECT *,tax_type AS match_type,remaining AS match_amount FROM assessment_remaining WHERE remaining>0
              UNION ALL
-             SELECT taxpayer_id,MAX(owner_code),MAX(taxpayer_type),MAX(first_name),MAX(last_name),MAX(company_name),
+             SELECT taxpayer_id,MAX(owner_code),MAX(taxpayer_type),MAX(title),MAX(first_name),MAX(last_name),MAX(company_name),
                     group_code,tax_year,'BOTH',SUM(assessed_amount),SUM(remaining),'BOTH',SUM(remaining)
              FROM assessment_remaining
              GROUP BY taxpayer_id,group_code,tax_year
              HAVING COUNT(*) FILTER (WHERE remaining>0)>1 AND SUM(remaining)>0
            )
-           SELECT taxpayer_id,owner_code,taxpayer_type,first_name,last_name,company_name,group_code,
+           SELECT taxpayer_id,owner_code,taxpayer_type,title,first_name,last_name,company_name,group_code,
                   tax_year,match_type,match_amount,(match_amount-%s) AS difference
            FROM candidates
            WHERE ABS(match_amount-%s)<=%s
@@ -1254,6 +1259,7 @@ def create_complete_taxpayer(request: CompleteTaxpayerCreate, http_request: Requ
     try:
         taxpayer_type = request.taxpayer_type
         owner_code = request.owner_code
+        title = (request.title or "").strip() or None
         first_name = request.first_name
         last_name = request.last_name
         company_name = request.company_name
@@ -1270,9 +1276,10 @@ def create_complete_taxpayer(request: CompleteTaxpayerCreate, http_request: Requ
             if not company_name:
                 raise HTTPException(
                     status_code=400,
-                    detail="นิติบุคคลหรือบริษัทต้องมีชื่อบริษัท"
+                    detail="หน่วยงานหรือนิติบุคคลต้องมีชื่อ"
                 )
             owner_code = None
+            title = None
             first_name = None
             last_name = None
             group_code = "ว-ฮ และบริษัท"
@@ -1300,14 +1307,14 @@ def create_complete_taxpayer(request: CompleteTaxpayerCreate, http_request: Requ
             cursor.execute(
                 """
                 INSERT INTO public.taxpayers (
-                    taxpayer_type, owner_code, first_name, last_name,
+                    taxpayer_type, owner_code, title, first_name, last_name,
                     company_name, phone, address, group_code, is_active
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING taxpayer_id
                 """,
                 (
-                    taxpayer_type, owner_code, first_name, last_name,
+                    taxpayer_type, owner_code, title, first_name, last_name,
                     company_name, request.phone, request.address,
                     group_code, request.is_active
                 )
@@ -1374,6 +1381,7 @@ def create_taxpayer(request: TaxpayerCreate, http_request: Request):
     result = taxpayers_service.create(
         taxpayer_type=request.taxpayer_type,
         owner_code=request.owner_code,
+        title=request.title,
         first_name=request.first_name,
         last_name=request.last_name,
         company_name=request.company_name,
@@ -1401,6 +1409,7 @@ def create_taxpayer(request: TaxpayerCreate, http_request: Request):
 class TaxpayerUpdate(BaseModel):
     taxpayer_type: str
     owner_code: str | None = None
+    title: str | None = None
     first_name: str | None = None
     last_name: str | None = None
     company_name: str | None = None
@@ -1420,6 +1429,7 @@ def update_taxpayer(
         taxpayer_id=taxpayer_id,
         taxpayer_type=request.taxpayer_type,
         owner_code=request.owner_code,
+        title=request.title,
         first_name=request.first_name,
         last_name=request.last_name,
         company_name=request.company_name,
