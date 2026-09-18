@@ -790,7 +790,7 @@ def get_payment_allocations(request: Request):
 
 @app.get("/api/reports/monthly-payments")
 def get_monthly_payment_report(request: Request, tax_year: int, group_code: str | None = None):
-    """สรุปยอดรับชำระจาก payment_date จริง แยกเดือนและประเภทภาษี"""
+    """สรุปยอดที่รับจริงในปีรายงาน รวมเงินที่นำไปตัดหนี้ของปีก่อน"""
     try:
         officer_group = _officer_group(request)
         if officer_group is not None:
@@ -815,12 +815,13 @@ def get_monthly_payment_report(request: Request, tax_year: int, group_code: str 
                 ON tyr.year_record_id = ta.year_record_id
             JOIN public.taxpayers t
                 ON t.taxpayer_id = tyr.taxpayer_id
-            WHERE tyr.tax_year = %s
+            WHERE EXTRACT(YEAR FROM p.payment_date)::int = %s - 543
+              AND tyr.tax_year <= %s
               AND (%s::text IS NULL OR t.group_code = %s::text)
             GROUP BY EXTRACT(MONTH FROM p.payment_date)
             ORDER BY payment_month
             """,
-            (tax_year, group_code, group_code)
+            (tax_year, tax_year, group_code, group_code)
         )
         by_month = {row[0]: dict(zip(columns, row)) for row in data}
         months = []
