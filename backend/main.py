@@ -115,6 +115,11 @@ def _invite_token() -> tuple[str, str]:
     return token, hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+def _internal_employee_code() -> str:
+    """Opaque legacy key kept only for database compatibility and relationships."""
+    return f"SYS-{uuid.uuid4().hex[:16].upper()}"
+
+
 def _login_key(request: Request, username: str) -> str:
     forwarded = request.headers.get("x-forwarded-for", "")
     client_ip = forwarded.split(",", 1)[0].strip() or (request.client.host if request.client else "unknown")
@@ -371,7 +376,6 @@ def get_users(request: Request):
         )
 
 class AdminUserCreate(BaseModel):
-    employee_code: str
     first_name: str
     last_name: str
     username: str
@@ -382,7 +386,6 @@ class AdminUserCreate(BaseModel):
     is_active: bool = True
 
 class AdminUserUpdate(BaseModel):
-    employee_code: str
     first_name: str
     last_name: str
     username: str
@@ -397,7 +400,6 @@ class AdminPasswordReset(BaseModel):
 
 
 class AdminUserInvitation(BaseModel):
-    employee_code: str
     first_name: str
     last_name: str
     email: str
@@ -439,27 +441,28 @@ def create_user_invitation(payload: AdminUserInvitation, http_request: Request):
         raise HTTPException(status_code=400, detail="สิทธิ์ผู้ใช้งานไม่ถูกต้อง")
     if role == "OFFICER" and not payload.group_code:
         raise HTTPException(status_code=400, detail="กรุณาเลือกกลุ่มรับผิดชอบ")
-    if not payload.employee_code.strip() or not payload.first_name.strip() or not payload.last_name.strip():
+    if not payload.first_name.strip() or not payload.last_name.strip():
         raise HTTPException(status_code=400, detail="กรุณากรอกข้อมูลที่จำเป็นให้ครบถ้วน")
     expires_hours = max(1, min(168, int(os.getenv("INVITATION_EXPIRES_HOURS", "48"))))
     token, token_hash = _invite_token()
     url = _invitation_url(token)
     try:
         with db.transaction() as cursor:
+            employee_code = _internal_employee_code()
             cursor.execute(
-                """SELECT user_id FROM public.users WHERE employee_code=%s OR LOWER(email)=%s""",
-                (payload.employee_code.strip(), email),
+                """SELECT user_id FROM public.users WHERE LOWER(email)=%s""",
+                (email,),
             )
             if cursor.fetchone():
-                raise HTTPException(status_code=409, detail="รหัสพนักงานหรืออีเมลนี้มีบัญชีอยู่แล้ว")
+                raise HTTPException(status_code=409, detail="อีเมลนี้มีบัญชีอยู่แล้ว")
             cursor.execute(
                 """SELECT invitation_id FROM public.user_invitations
-                   WHERE (employee_code=%s OR LOWER(email)=%s)
+                   WHERE LOWER(email)=%s
                      AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at>CURRENT_TIMESTAMP""",
-                (payload.employee_code.strip(), email),
+                (email,),
             )
             if cursor.fetchone():
-                raise HTTPException(status_code=409, detail="มีคำเชิญที่ยังไม่หมดอายุสำหรับรหัสพนักงานหรืออีเมลนี้")
+                raise HTTPException(status_code=409, detail="มีลิงก์คำเชิญที่ยังไม่หมดอายุสำหรับอีเมลนี้")
             if role == "OFFICER":
                 cursor.execute(
                     """SELECT user_id FROM public.responsibility_assignments
@@ -471,7 +474,7 @@ def create_user_invitation(payload: AdminUserInvitation, http_request: Request):
                 """INSERT INTO public.user_invitations
                    (email,employee_code,first_name,last_name,role,group_code,token_hash,expires_at,created_by)
                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING invitation_id""",
-                (email, payload.employee_code.strip(), payload.first_name.strip(),
+                (email, employee_code, payload.first_name.strip(),
                  payload.last_name.strip(), role, payload.group_code if role == "OFFICER" else None,
                  token_hash, datetime.now(timezone.utc) + timedelta(hours=expires_hours), _actor_id(http_request)),
             )
@@ -514,7 +517,7 @@ def accept_user_invitation(payload: AcceptUserInvitation):
             (username, invitation["employee_code"], invitation["email"]),
         )
         if cursor.fetchone():
-            raise HTTPException(status_code=409, detail="ชื่อผู้ใช้งาน รหัสพนักงาน หรืออีเมลนี้ถูกใช้งานแล้ว")
+            raise HTTPException(status_code=409, detail="ชื่อผู้ใช้งานหรืออีเมลนี้ถูกใช้งานแล้ว")
         cursor.execute(
             """INSERT INTO public.users
                (employee_code,first_name,last_name,role,username,email,password_hash,is_active)
@@ -568,23 +571,24 @@ def create_admin_user(request: AdminUserCreate):
     email = _clean_email(request.email)
     try:
         with db.transaction() as cursor:
+            employee_code = _internal_employee_code()
             cursor.execute(
                 """SELECT user_id FROM public.users
-                   WHERE employee_code=%s OR username=%s OR (%s IS NOT NULL AND LOWER(email)=%s)""",
-                (request.employee_code.strip(), request.username.strip(), email, email),
+                   WHERE username=%s OR (%s IS NOT NULL AND LOWER(email)=%s)""",
+                (request.username.strip(), email, email),
             )
             if cursor.fetchone():
-                raise HTTPException(status_code=409, detail="รหัสพนักงานหรือ Username ถูกใช้งานแล้ว")
+                raise HTTPException(status_code=409, detail="ชื่อผู้ใช้งานหรืออีเมลถูกใช้งานแล้ว")
             cursor.execute(
                 """INSERT INTO public.users
                    (employee_code,first_name,last_name,role,username,email,password_hash,is_active)
                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING user_id""",
-                (request.employee_code.strip(), request.first_name.strip(), request.last_name.strip(),
+                (employee_code, request.first_name.strip(), request.last_name.strip(),
                  role, request.username.strip(), email, password_hash.hash(request.password), request.is_active),
             )
             user_id = cursor.fetchone()[0]
             _save_user_assignment(cursor, user_id, role, request.group_code)
-        return {"success": True, "data": {"user_id": user_id}}
+        return {"success": True, "data": {"user_id": user_id, "employee_code": employee_code}}
     except HTTPException:
         raise
     except Exception as error:
@@ -607,28 +611,28 @@ def update_admin_user(user_id: int, request: AdminUserUpdate):
                 raise HTTPException(status_code=404, detail="ไม่พบผู้ใช้งาน")
             cursor.execute(
                 """SELECT user_id FROM public.users
-                   WHERE (employee_code=%s OR username=%s OR (%s IS NOT NULL AND LOWER(email)=%s))
+                   WHERE (username=%s OR (%s IS NOT NULL AND LOWER(email)=%s))
                      AND user_id<>%s""",
-                (request.employee_code.strip(), request.username.strip(), email, email, user_id),
+                (request.username.strip(), email, email, user_id),
             )
             if cursor.fetchone():
-                raise HTTPException(status_code=409, detail="รหัสพนักงานหรือ Username ถูกใช้งานแล้ว")
+                raise HTTPException(status_code=409, detail="ชื่อผู้ใช้งานหรืออีเมลถูกใช้งานแล้ว")
             if request.password:
                 cursor.execute(
-                    """UPDATE public.users SET employee_code=%s,first_name=%s,last_name=%s,
+                    """UPDATE public.users SET first_name=%s,last_name=%s,
                        role=%s,username=%s,email=%s,password_hash=%s,is_active=%s,updated_at=CURRENT_TIMESTAMP
                        WHERE user_id=%s""",
-                    (request.employee_code.strip(), request.first_name.strip(), request.last_name.strip(),
-                     role, request.username.strip(), email, password_hash.hash(request.password),
+                    (request.first_name.strip(), request.last_name.strip(), role,
+                     request.username.strip(), email, password_hash.hash(request.password),
                      request.is_active, user_id),
                 )
             else:
                 cursor.execute(
-                    """UPDATE public.users SET employee_code=%s,first_name=%s,last_name=%s,
+                    """UPDATE public.users SET first_name=%s,last_name=%s,
                        role=%s,username=%s,email=%s,is_active=%s,updated_at=CURRENT_TIMESTAMP
                        WHERE user_id=%s""",
-                    (request.employee_code.strip(), request.first_name.strip(), request.last_name.strip(),
-                     role, request.username.strip(), email, request.is_active, user_id),
+                    (request.first_name.strip(), request.last_name.strip(), role,
+                     request.username.strip(), email, request.is_active, user_id),
                 )
             _save_user_assignment(cursor, user_id, role, request.group_code)
         return {"success": True}

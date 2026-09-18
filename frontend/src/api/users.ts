@@ -47,7 +47,6 @@ export async function getUsers(): Promise<User[]> {
 }
 
 export interface SaveUserInput {
-  employee_code: string
   first_name: string
   last_name: string
   username: string
@@ -71,9 +70,9 @@ async function userMutation(url: string, method: string, data?: unknown) {
   return result
 }
 
-export async function createUser(data: SaveUserInput): Promise<string> {
+export async function createUser(data: SaveUserInput): Promise<{ id: string; code: string }> {
   const result = await userMutation(`${API_URL}/users`, 'POST', data)
-  return String(result.data.user_id)
+  return { id: String(result.data.user_id), code: String(result.data.employee_code) }
 }
 
 export async function updateUserRecord(userId: number, data: SaveUserInput) {
@@ -93,7 +92,6 @@ export async function deleteUser(userId: number) {
 }
 
 export interface InviteUserInput {
-  employee_code: string
   first_name: string
   last_name: string
   email: string

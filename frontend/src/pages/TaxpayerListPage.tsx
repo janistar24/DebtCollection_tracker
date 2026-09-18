@@ -966,7 +966,8 @@ const handleInlineAdd = async () => {
           <div className="annual-table-wrap" onWheel={event => {
             if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) {
               event.preventDefault()
-              window.scrollBy({ top: event.deltaY, behavior: 'auto' })
+              const page = event.currentTarget.closest('.app-main-content') as HTMLElement | null
+              if (page) page.scrollTop += event.deltaY
             }
           }}>
             <table className="annual-taxpayer-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>

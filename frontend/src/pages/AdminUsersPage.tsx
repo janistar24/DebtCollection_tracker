@@ -8,7 +8,7 @@ import { createUser, createUserInvitation, deleteUser, resetUserPassword, setUse
 
 const GROUPS = ['ก-น', 'บ-ล', 'ส-ศ', 'ว-ฮ และบริษัท']
 const ROLES = { officer: 'เจ้าหน้าที่ผู้รับผิดชอบ', director: 'ผู้บริหาร', admin: 'ผู้ดูแลระบบ' }
-const EMPTY = { code: '', name: '', username: '', email: '', password: '', role: 'officer', group: 'ก-น', active: true }
+const EMPTY = { name: '', username: '', email: '', password: '', role: 'officer', group: 'ก-น', active: true }
 
 export default function AdminUsersPage() {
   const { currentUser, users, addUser, updateUser, removeUser } = useApp()
@@ -31,31 +31,30 @@ export default function AdminUsersPage() {
   const openAdd = () => { setEditUser(null); setForm(EMPTY); setCreateMode('password'); setShowForm(true) }
   const openEdit = (u: User) => {
     setEditUser(u)
-    setForm({ code: u.code, name: u.name, username: u.username ?? '', email: u.email ?? '', password: '', role: u.role, group: u.group ?? 'ก-น', active: u.active })
+    setForm({ name: u.name, username: u.username ?? '', email: u.email ?? '', password: '', role: u.role, group: u.group ?? 'ก-น', active: u.active })
     setShowForm(true)
   }
 
   const save = async () => {
     const parts = form.name.trim().split(/\s+/), firstName = parts.shift() ?? '', lastName = parts.join(' ')
     if (!firstName || !lastName) return notify('error', 'กรุณาระบุชื่อและนามสกุลให้ครบถ้วน')
-    if (!form.code.trim()) return notify('error', 'กรุณากรอกข้อมูลที่จำเป็นให้ครบถ้วน')
     if (createMode === 'email' && !editUser && !form.email.trim()) return notify('error', 'กรุณาระบุอีเมลผู้รับคำเชิญ')
     if ((editUser || createMode === 'password') && !form.username.trim()) return notify('error', 'กรุณาระบุชื่อผู้ใช้งาน')
     if (!editUser && createMode === 'password' && form.password.length < 12) return notify('error', 'รหัสผ่านชั่วคราวต้องมีอย่างน้อย 12 ตัวอักษร')
-    const payload = { employee_code: form.code.trim(), first_name: firstName, last_name: lastName, username: form.username.trim(), email: form.email.trim() || null, password: form.password || undefined, role: form.role.toUpperCase(), group_code: form.role === 'officer' ? form.group : null, is_active: form.active }
+    const payload = { first_name: firstName, last_name: lastName, username: form.username.trim(), email: form.email.trim() || null, password: form.password || undefined, role: form.role.toUpperCase(), group_code: form.role === 'officer' ? form.group : null, is_active: form.active }
     try {
       setBusy(true)
       if (editUser) {
         await updateUserRecord(Number(editUser.id), payload)
-        updateUser({ ...editUser, code: payload.employee_code, name: `${firstName} ${lastName}`, username: payload.username, email: form.email.trim() || undefined, role: form.role as User['role'], group: form.role === 'officer' ? form.group : undefined, active: form.active })
+        updateUser({ ...editUser, name: `${firstName} ${lastName}`, username: payload.username, email: form.email.trim() || undefined, role: form.role as User['role'], group: form.role === 'officer' ? form.group : undefined, active: form.active })
         notify('success', 'ปรับปรุงข้อมูลบัญชีผู้ใช้งานเรียบร้อยแล้ว')
       } else if (createMode === 'email') {
-        const link = await createUserInvitation({ employee_code: payload.employee_code, first_name: firstName, last_name: lastName, email: form.email.trim(), role: payload.role, group_code: payload.group_code })
+        const link = await createUserInvitation({ first_name: firstName, last_name: lastName, email: form.email.trim(), role: payload.role, group_code: payload.group_code })
         setInvitationLink(link)
         notify('success', 'สร้างลิงก์คำเชิญเรียบร้อยแล้ว')
       } else {
-        const id = await createUser({ ...payload, password: form.password })
-        addUser({ id, code: payload.employee_code, name: `${firstName} ${lastName}`, username: payload.username, email: form.email.trim() || undefined, role: form.role as User['role'], group: form.role === 'officer' ? form.group : undefined, active: form.active })
+        const created = await createUser({ ...payload, password: form.password })
+        addUser({ id: created.id, code: created.code, name: `${firstName} ${lastName}`, username: payload.username, email: form.email.trim() || undefined, role: form.role as User['role'], group: form.role === 'officer' ? form.group : undefined, active: form.active })
         notify('success', 'สร้างบัญชีผู้ใช้งานเรียบร้อยแล้ว')
       }
       setShowForm(false)
@@ -97,7 +96,7 @@ export default function AdminUsersPage() {
           const self = u.id === currentUser?.id
           return <tr key={u.id} className="table-row-hover" style={{ borderBottom: '1px solid rgba(200,190,240,.2)' }}>
             <td style={{ ...TD, fontFamily: 'monospace', color: '#6d4fbb', fontWeight: 600 }}>{u.username || '—'}</td>
-            <td style={{ ...TD, fontWeight: 600 }}>{u.name}<div style={{ fontSize: 11.5, color: '#a89cc8', fontWeight: 400 }}>{u.code}</div></td>
+            <td style={{ ...TD, fontWeight: 600 }}>{u.name}</td>
             <td style={{ ...TD, color: '#6b5b95' }}>{u.email || '—'}</td>
             <td style={TD}><span style={{ fontFamily: 'monospace', letterSpacing: 2, color: '#7b728e' }}>••••••••</span></td>
             <td style={TD}><StatusBadge status={u.role} size="sm" /></td>
@@ -118,13 +117,13 @@ export default function AdminUsersPage() {
       <p style={SUB}>กำหนดข้อมูลบัญชีและขอบเขตสิทธิ์ให้สอดคล้องกับหน้าที่รับผิดชอบ</p>
       {!editUser && <div style={{ display: 'flex', gap: 8, marginTop: 15 }}><button className={createMode === 'password' ? 'btn-primary' : 'btn-secondary'} onClick={() => setCreateMode('password')}>กำหนดรหัสผ่านให้</button><button className={createMode === 'email' ? 'btn-primary' : 'btn-secondary'} onClick={() => setCreateMode('email')}>สร้างลิงก์คำเชิญ</button></div>}
       <div style={{ display: 'grid', gap: 15, marginTop: 16 }}>
-        <div style={GRID}><Field label="รหัสพนักงาน *"><input className="input-field" value={form.code} disabled={!!editUser} onChange={e => setForm({ ...form, code: e.target.value })} /></Field><Field label="ชื่อ-นามสกุล *"><input className="input-field" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field></div>
+        <Field label="ชื่อ-นามสกุล *"><input className="input-field" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
         <div style={GRID}>{(editUser || createMode === 'password') && <Field label="ชื่อผู้ใช้งาน *"><input className="input-field" autoComplete="off" value={form.username} onChange={e => setForm({ ...form, username: e.target.value })} /></Field>}<Field label={`อีเมล ${!editUser && createMode === 'email' ? '*' : '(ไม่บังคับ)'}`}><input className="input-field" type="email" autoComplete="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></Field></div>
         {!editUser && createMode === 'password' && <Field label="รหัสผ่านชั่วคราว *"><input className="input-field" type="password" autoComplete="new-password" placeholder="อย่างน้อย 12 ตัวอักษร" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} /></Field>}
         <div style={GRID}><Field label="สิทธิ์การใช้งาน *"><select className="input-field" value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}><option value="officer">เจ้าหน้าที่ผู้รับผิดชอบ</option><option value="director">ผู้บริหาร</option><option value="admin">ผู้ดูแลระบบ</option></select></Field>{form.role === 'officer' && <Field label="กลุ่มที่รับผิดชอบ *"><select className="input-field" value={form.group} onChange={e => setForm({ ...form, group: e.target.value })}>{GROUPS.map(g => <option key={g} value={g}>กลุ่ม {g}</option>)}</select></Field>}</div>
         <div style={INFO}>{form.role === 'officer' ? 'เจ้าหน้าที่จะเข้าถึงข้อมูลเฉพาะกลุ่มที่ได้รับมอบหมาย' : `${ROLES[form.role as keyof typeof ROLES]}สามารถเข้าถึงข้อมูลภาพรวมของทุกกลุ่ม`}</div>
       </div>
-      <Actions busy={busy} disabled={!form.code.trim() || !form.name.trim() || ((editUser || createMode === 'password') && !form.username.trim()) || (!editUser && createMode === 'password' && form.password.length < 12) || (!editUser && createMode === 'email' && !form.email.trim())} confirm={editUser ? 'บันทึกการแก้ไข' : createMode === 'email' ? 'ส่งคำเชิญ' : 'บันทึกบัญชี'} cancel={() => setShowForm(false)} run={save} />
+      <Actions busy={busy} disabled={!form.name.trim() || ((editUser || createMode === 'password') && !form.username.trim()) || (!editUser && createMode === 'password' && form.password.length < 12) || (!editUser && createMode === 'email' && !form.email.trim())} confirm={editUser ? 'บันทึกการแก้ไข' : createMode === 'email' ? 'สร้างลิงก์คำเชิญ' : 'บันทึกบัญชี'} cancel={() => setShowForm(false)} run={save} />
     </Modal>}
 
     {invitationLink && <Modal title="สร้างลิงก์คำเชิญเรียบร้อยแล้ว" onClose={() => setInvitationLink('')} maxWidth="620px">
