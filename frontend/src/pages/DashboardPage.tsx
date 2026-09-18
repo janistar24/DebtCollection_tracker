@@ -1402,7 +1402,7 @@ export default function DashboardPage() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr style={{ background: 'rgba(240,236,251,0.5)' }}>
-                  {['#', 'รหัส', 'ชื่อ-นามสกุล', 'ประเภทภาษี', 'ยอดที่ต้องชำระ', 'ยอดคงเหลือ', 'ติดต่อล่าสุด', 'ผลการติดต่อ', 'วันนัด', 'สถานะ', ''].map(h => (
+                  {['#', 'รหัส', 'ชื่อ-นามสกุล', 'ประเภทภาษี', 'ยอดประเมินปีปัจจุบัน', 'ยอดค้างชำระรวมทุกปี', 'ติดต่อล่าสุด', 'ผลการติดต่อ', 'วันนัด', 'สถานะ', ''].map(h => (
                     <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 600, color: '#6b5b95', whiteSpace: 'nowrap', borderBottom: '1px solid rgba(200,190,240,0.25)', fontSize: 12 }}>{h}</th>
                   ))}
                 </tr>
@@ -1424,9 +1424,11 @@ export default function DashboardPage() {
                     <tr key={tp.id} className="table-row-hover" style={{ borderBottom: '1px solid rgba(200,190,240,0.15)' }}>
                       <td style={{ padding: '10px 14px', color: '#a89cc8', fontSize: 12 }}>{i + 1}</td>
                       <td style={{ padding: '10px 14px', fontFamily: 'monospace', fontSize: 11, color: '#7c5cbf' }}>{tp.ownerCode}</td>
-                      <td style={{ padding: '10px 14px', fontWeight: 500, color: '#2d2545' }}>
-                        {getTaxpayerName(tp)}
-                        {outstandingYears.length > 1 && <div style={{ marginTop: 3 }}><span style={{ display: 'inline-block', padding: '2px 7px', borderRadius: 999, background: 'rgba(124,92,191,.1)', color: '#6b4aad', fontSize: 10 }}>มียอดค้าง {outstandingYears.length} ปีภาษี</span></div>}
+                      <td style={{ padding: '10px 14px', fontWeight: 500 }}>
+                        <button type="button" onClick={() => navigate(`/taxpayers/${tp.id}`)} style={{ border: 0, padding: 0, background: 'transparent', color: '#5c3d9e', font: 'inherit', fontWeight: 700, cursor: 'pointer', textAlign: 'left', textDecoration: 'underline', textDecorationColor: 'rgba(124,92,191,.3)', textUnderlineOffset: 3 }}>
+                          {getTaxpayerName(tp)}
+                        </button>
+                        {outstandingYears.some(item => item.assessment.year < selectedYear) && <div style={{ marginTop: 4 }}><span style={{ display: 'inline-block', padding: '2px 7px', borderRadius: 999, background: 'rgba(224,160,20,.10)', color: '#9a6800', fontSize: 10 }}>มีหนี้ค้างจากปีก่อน</span></div>}
                       </td>
                       <td style={{ padding: '10px 14px' }}>
                         {remainingTypes.length === 0
@@ -1438,8 +1440,8 @@ export default function DashboardPage() {
                             </div>
                         }
                       </td>
-                      <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 600, color: '#2d2545' }}>฿{formatCurrency(getTotalAssessed(tp, selectedYear))} บาท</td>
-                      <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 700, color: totalOutstanding > 0 ? '#c0392b' : '#1a8f5a' }}>฿{formatCurrency(totalOutstanding)} บาท{outstandingYears.length > 1 && <div style={{ color: '#a89cc8', fontSize: 10, fontWeight: 500, marginTop: 2 }}>รวมทุกปีภาษี</div>}</td>
+                      <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 600, color: '#2d2545' }}>฿{formatCurrency(getTotalAssessed(tp, selectedYear))} บาท<div style={{ color: '#a89cc8', fontSize: 10, fontWeight: 500, marginTop: 2 }}>ปีภาษี {selectedYear}</div></td>
+                      <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 700, color: totalOutstanding > 0 ? '#c0392b' : '#1a8f5a' }}>฿{formatCurrency(totalOutstanding)} บาท<div style={{ color: '#a89cc8', fontSize: 10, fontWeight: 500, marginTop: 2 }}>ปีปัจจุบัน + หนี้ค้างปีก่อน</div></td>
                       <td style={{ padding: '10px 14px', color: '#8873b5', fontSize: 12 }}>{lastFu ? formatDate(lastFu.date) : '-'}</td>
                       <td style={{ padding: '10px 14px', fontSize: 12, color: '#6b5b95', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lastFu?.detail ?? '-'}</td>
                       <td style={{ padding: '10px 14px', fontSize: 12, color: '#7c5cbf' }}>{lastFu?.promiseDate ? formatDate(lastFu.promiseDate) : '-'}</td>

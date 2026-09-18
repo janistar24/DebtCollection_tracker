@@ -6,7 +6,7 @@ import Modal from '../components/Modal'
 import EmptyState from '../components/EmptyState'
 import {
   getTaxpayerName, formatCurrency, getAssessment, getPaymentStatus,
-  CURRENT_YEAR, getGroupForCode
+  CURRENT_YEAR, getGroupForCode, getLandRemaining, getSignRemaining
 } from '../data/taxData'
 import {
   createTaxAssessment,
@@ -24,11 +24,23 @@ import type { Taxpayer } from '../types'
 const GROUPS = ['ก-น', 'บ-ล', 'ส-ศ', 'ว-ฮ และบริษัท']
 // Safari needs extra room for Thai text and notes that may wrap to a second line.
 // Keeping 22 records per A4 page prevents the final row from being clipped.
-const PRINT_ROWS_PER_PAGE = 22
+const PRINT_ROWS_PER_PAGE = 20
+
+const getPriorOutstanding = (tp: Taxpayer, year: number, type: 'land' | 'sign') =>
+  tp.assessments.filter(item => item.year < year).reduce((sum, item) => sum + (type === 'land'
+    ? getLandRemaining(tp, item.year)
+    : getSignRemaining(tp, item.year)), 0)
+
+const getAllOutstanding = (tp: Taxpayer, year: number, type: 'land' | 'sign') =>
+  getPriorOutstanding(tp, year, type) + (type === 'land'
+    ? getLandRemaining(tp, year)
+    : getSignRemaining(tp, year))
+
+const formatOutstanding = (value: number) => value > 0 ? value.toFixed(2) : '-'
 
 function exportExcel(rows: import('../types').Taxpayer[], year: number, group: string) {
   // Build CSV content (Excel-compatible UTF-8 BOM)
-  const header = ['ที่', 'ชื่อ - ชื่อสกุล', 'รหัสเจ้าของทรัพย์สิน', 'ภาษีที่ดินและสิ่งปลูกสร้าง (บาท)', 'เพิ่ม/ลด ภาษีที่ดินและสิ่งปลูกสร้าง', 'ภาษีป้าย (บาท)', 'เพิ่ม/ลด ป้าย', 'หมายเหตุ']
+  const header = ['ที่', 'ชื่อ - ชื่อสกุล', 'รหัสเจ้าของทรัพย์สิน', 'ภาษีที่ดินและสิ่งปลูกสร้าง (บาท)', 'เพิ่ม/ลด ภาษีที่ดินและสิ่งปลูกสร้าง', 'หนี้ค้างปีก่อน ภาษีที่ดินและสิ่งปลูกสร้าง', 'ยอดคงเหลือรวม ภาษีที่ดินและสิ่งปลูกสร้าง', 'ภาษีป้าย (บาท)', 'เพิ่ม/ลด ภาษีป้าย', 'หนี้ค้างปีก่อน ภาษีป้าย', 'ยอดคงเหลือรวม ภาษีป้าย', 'หมายเหตุ']
   const body = rows.map((tp, i) => {
     const a = tp.assessments.find(x => x.year === year)
     const land = a?.landAmount ?? 0
@@ -36,7 +48,9 @@ function exportExcel(rows: import('../types').Taxpayer[], year: number, group: s
     const dland = land - (a?.prevLandAmount ?? 0)
     const dsign = sign - (a?.prevSignAmount ?? 0)
     const name = tp.type === 'company' ? (tp.companyName ?? '') : `${tp.title ?? ''}${tp.firstName} ${tp.lastName}`
-    return [i + 1, name, tp.ownerCode, land.toFixed(2), dland.toFixed(2), sign.toFixed(2), dsign.toFixed(2), tp.notes ?? '']
+    const priorLand = getPriorOutstanding(tp, year, 'land')
+    const priorSign = getPriorOutstanding(tp, year, 'sign')
+    return [i + 1, name, tp.ownerCode, land.toFixed(2), dland.toFixed(2), formatOutstanding(priorLand), formatOutstanding(getAllOutstanding(tp, year, 'land')), sign.toFixed(2), dsign.toFixed(2), formatOutstanding(priorSign), formatOutstanding(getAllOutstanding(tp, year, 'sign')), tp.notes ?? '']
   })
   const csvRows = [header, ...body].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))
   const groupLabel = group === 'all' ? 'ทุกกลุ่ม' : group
@@ -120,6 +134,10 @@ export default function TaxpayerListPage() {
 
   const landTotal = filtered.reduce((s, tp) => s + (getAssessment(tp, selectedYear)?.landAmount ?? 0), 0)
   const signTotal = filtered.reduce((s, tp) => s + (getAssessment(tp, selectedYear)?.signAmount ?? 0), 0)
+  const priorLandTotal = filtered.reduce((s, tp) => s + getPriorOutstanding(tp, selectedYear, 'land'), 0)
+  const priorSignTotal = filtered.reduce((s, tp) => s + getPriorOutstanding(tp, selectedYear, 'sign'), 0)
+  const outstandingLandTotal = filtered.reduce((s, tp) => s + getAllOutstanding(tp, selectedYear, 'land'), 0)
+  const outstandingSignTotal = filtered.reduce((s, tp) => s + getAllOutstanding(tp, selectedYear, 'sign'), 0)
   const printPages = useMemo(() => {
     const pages: Taxpayer[][] = []
     for (let index = 0; index < filtered.length; index += PRINT_ROWS_PER_PAGE) {
@@ -893,20 +911,24 @@ const handleInlineAdd = async () => {
             </header>
             <div className="annual-print-table-title">รายละเอียดผู้ชำระภาษีที่ดินและสิ่งปลูกสร้าง-ภาษีป้าย_{selectedYear}_{tableGroupLabel}</div>
             <table className="annual-print-table">
-              <colgroup><col className="print-col-number" /><col className="print-col-code" /><col className="print-col-name" /><col span={6} className="print-col-tax" /><col className="print-col-note" /><col className="print-col-status" /></colgroup>
-              <thead><tr><th rowSpan={2}>#</th><th rowSpan={2}>รหัส</th><th rowSpan={2}>ชื่อ-นามสกุล / บริษัท</th><th colSpan={3}>ภาษีที่ดินและสิ่งปลูกสร้าง</th><th colSpan={3}>ภาษีป้าย</th><th rowSpan={2}>หมายเหตุ</th><th rowSpan={2}>สถานะ</th></tr><tr><th>ปีนี้</th><th>ปีก่อน</th><th>เพิ่ม/ลด</th><th>ปีนี้</th><th>ปีก่อน</th><th>เพิ่ม/ลด</th></tr></thead>
+              <colgroup><col className="print-col-number" /><col className="print-col-code" /><col className="print-col-name" /><col span={10} className="print-col-tax" /><col className="print-col-note" /><col className="print-col-status" /></colgroup>
+              <thead><tr><th rowSpan={2}>#</th><th rowSpan={2}>รหัส</th><th rowSpan={2}>ชื่อ-นามสกุล / บริษัท</th><th colSpan={5}>ภาษีที่ดินและสิ่งปลูกสร้าง</th><th colSpan={5}>ภาษีป้าย</th><th rowSpan={2}>หมายเหตุ</th><th rowSpan={2}>สถานะ</th></tr><tr><th>ประเมิน<br/>ปีนี้</th><th>ประเมิน<br/>ปีก่อน</th><th>เพิ่ม/ลด</th><th>หนี้ค้าง<br/>ปีก่อน</th><th>คงเหลือ<br/>รวม</th><th>ประเมิน<br/>ปีนี้</th><th>ประเมิน<br/>ปีก่อน</th><th>เพิ่ม/ลด</th><th>หนี้ค้าง<br/>ปีก่อน</th><th>คงเหลือ<br/>รวม</th></tr></thead>
               <tbody>{pageRows.map((tp, rowIndex) => {
                 const assessment = getAssessment(tp, selectedYear)
                 const currentLand = assessment?.landAmount ?? 0
                 const currentSign = assessment?.signAmount ?? 0
                 const previousLand = assessment?.prevLandAmount ?? 0
                 const previousSign = assessment?.prevSignAmount ?? 0
+                const priorLand = getPriorOutstanding(tp, selectedYear, 'land')
+                const priorSign = getPriorOutstanding(tp, selectedYear, 'sign')
+                const outstandingLand = getAllOutstanding(tp, selectedYear, 'land')
+                const outstandingSign = getAllOutstanding(tp, selectedYear, 'sign')
                 const status = getPaymentStatus(tp, selectedYear)
                 const statusLabel = status === 'paid' ? 'ชำระครบ' : status === 'partial' ? 'ชำระบางส่วน' : 'ยังไม่ชำระ'
                 const formatDifference = (value: number) => value === 0 ? 'เท่าเดิม' : `${value > 0 ? '+' : ''}${formatCurrency(value)}`
-                return <tr key={`print-${tp.id}`}><td>{pageIndex * PRINT_ROWS_PER_PAGE + rowIndex + 1}</td><td>{tp.ownerCode || '-'}</td><td>{getTaxpayerName(tp)}</td><td className="number-cell">฿{formatCurrency(currentLand)}</td><td className="number-cell">฿{formatCurrency(previousLand)}</td><td className="number-cell">{formatDifference(currentLand - previousLand)}</td><td className="number-cell">฿{formatCurrency(currentSign)}</td><td className="number-cell">฿{formatCurrency(previousSign)}</td><td className="number-cell">{formatDifference(currentSign - previousSign)}</td><td>{tp.notes || '-'}</td><td>{statusLabel}</td></tr>
+                return <tr key={`print-${tp.id}`}><td>{pageIndex * PRINT_ROWS_PER_PAGE + rowIndex + 1}</td><td>{tp.ownerCode || '-'}</td><td>{getTaxpayerName(tp)}</td><td className="number-cell">฿{formatCurrency(currentLand)}</td><td className="number-cell">฿{formatCurrency(previousLand)}</td><td className="number-cell">{formatDifference(currentLand - previousLand)}</td><td className="number-cell">{priorLand > 0 ? `฿${formatCurrency(priorLand)}` : '-'}</td><td className="number-cell">{outstandingLand > 0 ? `฿${formatCurrency(outstandingLand)}` : '-'}</td><td className="number-cell">฿{formatCurrency(currentSign)}</td><td className="number-cell">฿{formatCurrency(previousSign)}</td><td className="number-cell">{formatDifference(currentSign - previousSign)}</td><td className="number-cell">{priorSign > 0 ? `฿${formatCurrency(priorSign)}` : '-'}</td><td className="number-cell">{outstandingSign > 0 ? `฿${formatCurrency(outstandingSign)}` : '-'}</td><td>{tp.notes || '-'}</td><td>{statusLabel}</td></tr>
               })}</tbody>
-              {pageIndex === printPages.length - 1 && <tfoot><tr><td colSpan={3}>รวม {filtered.length} ราย</td><td className="number-cell">฿{formatCurrency(landTotal)}</td><td colSpan={2}></td><td className="number-cell">฿{formatCurrency(signTotal)}</td><td colSpan={2}></td><td className="number-cell">฿{formatCurrency(landTotal + signTotal)}</td><td></td></tr></tfoot>}
+              {pageIndex === printPages.length - 1 && <tfoot><tr><td colSpan={3}>รวม {filtered.length} ราย</td><td className="number-cell">฿{formatCurrency(landTotal)}</td><td colSpan={2}></td><td className="number-cell">฿{formatCurrency(priorLandTotal)}</td><td className="number-cell">฿{formatCurrency(outstandingLandTotal)}</td><td className="number-cell">฿{formatCurrency(signTotal)}</td><td colSpan={2}></td><td className="number-cell">฿{formatCurrency(priorSignTotal)}</td><td className="number-cell">฿{formatCurrency(outstandingSignTotal)}</td><td colSpan={2}></td></tr></tfoot>}
             </table>
           </section>
         ))}
@@ -947,7 +969,7 @@ const handleInlineAdd = async () => {
                 <col className="col-number" />
                 <col className="col-code" />
                 <col className="col-name" />
-                <col span={6} className="col-tax" />
+                <col span={10} className="col-tax" />
                 <col className="col-note" />
                 <col className="col-status" />
                 {editMode && <col className="col-action" />}
@@ -957,8 +979,8 @@ const handleInlineAdd = async () => {
                   <th style={TH}>#</th>
                   <th style={TH}>รหัส</th>
                   <th style={TH}>ชื่อ-นามสกุล / บริษัท</th>
-                  <th style={{ ...TH, textAlign: 'center' }} colSpan={3}>ภาษีที่ดินและสิ่งปลูกสร้าง</th>
-                  <th style={{ ...TH, textAlign: 'center' }} colSpan={3}>ภาษีป้าย</th>
+                  <th style={{ ...TH, textAlign: 'center' }} colSpan={5}>ภาษีที่ดินและสิ่งปลูกสร้าง</th>
+                  <th style={{ ...TH, textAlign: 'center' }} colSpan={5}>ภาษีป้าย</th>
                   <th style={TH}>หมายเหตุ</th>
                   <th style={TH}>สถานะ</th>
                   {editMode && <th style={{ ...TH, width: 40 }}></th>}
@@ -966,8 +988,8 @@ const handleInlineAdd = async () => {
 
                 <tr style={{ background: 'rgba(240,236,251,0.35)' }}>
                   <th style={TH} colSpan={3}></th>
-                  {['ปีนี้', 'ปีก่อน', 'เพิ่ม/ลด'].map(h => <th key={`l${h}`} style={{ ...TH, fontWeight: 500, color: '#8873b5', fontSize: 11 }}>{h}</th>)}
-                  {['ปีนี้', 'ปีก่อน', 'เพิ่ม/ลด'].map(h => <th key={`s${h}`} style={{ ...TH, fontWeight: 500, color: '#8873b5', fontSize: 11 }}>{h}</th>)}
+                  {['ยอดประเมินปีนี้', 'ยอดประเมินปีก่อน', 'เพิ่ม/ลด', 'หนี้ค้างปีก่อน', 'ยอดคงเหลือรวม'].map(h => <th key={`l${h}`} style={{ ...TH, fontWeight: 500, color: '#8873b5', fontSize: 11 }}>{h}</th>)}
+                  {['ยอดประเมินปีนี้', 'ยอดประเมินปีก่อน', 'เพิ่ม/ลด', 'หนี้ค้างปีก่อน', 'ยอดคงเหลือรวม'].map(h => <th key={`s${h}`} style={{ ...TH, fontWeight: 500, color: '#8873b5', fontSize: 11 }}>{h}</th>)}
                   <th style={TH} colSpan={editMode ? 3 : 2}></th>
                 </tr>
               </thead>
@@ -982,6 +1004,10 @@ const handleInlineAdd = async () => {
                   const curSign = cellVal(tp, 'sign')
                   const landEdited = pendingEdits[landKey] !== undefined
                   const signEdited = pendingEdits[signKey] !== undefined
+                  const priorLand = getPriorOutstanding(tp, selectedYear, 'land')
+                  const priorSign = getPriorOutstanding(tp, selectedYear, 'sign')
+                  const outstandingLand = getAllOutstanding(tp, selectedYear, 'land')
+                  const outstandingSign = getAllOutstanding(tp, selectedYear, 'sign')
 
                   return (
                     <tr key={tp.id} className="table-row-hover" style={{ borderBottom: '1px solid rgba(200,190,240,0.15)' }}>
@@ -1000,6 +1026,8 @@ const handleInlineAdd = async () => {
 
                       <td style={{ ...TD, textAlign: 'right', color: '#a89cc8' }}>฿{formatCurrency(a?.prevLandAmount ?? 0)}</td>
                       <td style={{ ...TD, textAlign: 'right' }}>{diff(curLand, a?.prevLandAmount ?? 0)}</td>
+                      <td style={{ ...TD, textAlign: 'right', color: priorLand > 0 ? '#b26b00' : '#a89cc8', fontWeight: priorLand > 0 ? 600 : 400 }}>{priorLand > 0 ? `฿${formatCurrency(priorLand)}` : '-'}</td>
+                      <td style={{ ...TD, textAlign: 'right', color: outstandingLand > 0 ? '#c0392b' : '#1a8f5a', fontWeight: 700 }}>{outstandingLand > 0 ? `฿${formatCurrency(outstandingLand)}` : '-'}</td>
 
                       {/* sign */}
                       <td style={{ ...TD, textAlign: 'right', background: signEdited ? 'rgba(124,92,191,0.06)' : undefined }}>
@@ -1012,6 +1040,8 @@ const handleInlineAdd = async () => {
 
                       <td style={{ ...TD, textAlign: 'right', color: '#a89cc8' }}>฿{formatCurrency(a?.prevSignAmount ?? 0)}</td>
                       <td style={{ ...TD, textAlign: 'right' }}>{diff(curSign, a?.prevSignAmount ?? 0)}</td>
+                      <td style={{ ...TD, textAlign: 'right', color: priorSign > 0 ? '#b26b00' : '#a89cc8', fontWeight: priorSign > 0 ? 600 : 400 }}>{priorSign > 0 ? `฿${formatCurrency(priorSign)}` : '-'}</td>
+                      <td style={{ ...TD, textAlign: 'right', color: outstandingSign > 0 ? '#c0392b' : '#1a8f5a', fontWeight: 700 }}>{outstandingSign > 0 ? `฿${formatCurrency(outstandingSign)}` : '-'}</td>
 
                       <td style={{ ...TD, maxWidth: 160 }}>
                         {editMode && isCurrentYear ? (
@@ -1042,7 +1072,7 @@ const handleInlineAdd = async () => {
                 {/* Inline add row — Searchable Dropdown */}
                 {editMode && isCurrentYear && (
                   <tr style={{ background: 'rgba(240,236,251,0.35)', borderTop: '2px dashed rgba(124,92,191,0.25)' }}>
-                    <td style={TD} colSpan={editMode ? 12 : 11}>
+                    <td style={TD} colSpan={editMode ? 16 : 15}>
                       <div style={{ fontSize: 11, color: '#7c5cbf', marginBottom: 3, fontWeight: 600 }}>+ เพิ่มรายการ</div>
                       <div style={{ fontSize: 10, color: '#a89cc8', marginBottom: 7 }}>
                         เลือกผู้เสียภาษีแล้วเพิ่มเข้าตาราง ระบบจะใช้ยอดภาษีล่าสุดเป็นค่าเริ่มต้น
@@ -1126,9 +1156,12 @@ const handleInlineAdd = async () => {
                   <td colSpan={3} style={{ ...TD, color: '#7c5cbf' }}>รวม {filtered.length} ราย</td>
                   <td style={{ ...TD, textAlign: 'right', color: '#2d2545' }}>฿{formatCurrency(landTotal)}</td>
                   <td colSpan={2} style={TD}></td>
+                  <td style={{ ...TD, textAlign: 'right', color: '#b26b00' }}>฿{formatCurrency(priorLandTotal)}</td>
+                  <td style={{ ...TD, textAlign: 'right', color: '#c0392b' }}>฿{formatCurrency(outstandingLandTotal)}</td>
                   <td style={{ ...TD, textAlign: 'right', color: '#2d2545' }}>฿{formatCurrency(signTotal)}</td>
                   <td colSpan={2} style={TD}></td>
-                  <td style={{ ...TD, fontWeight: 700, color: '#7c5cbf' }}>฿{formatCurrency(landTotal + signTotal)}</td>
+                  <td style={{ ...TD, textAlign: 'right', color: '#b26b00' }}>฿{formatCurrency(priorSignTotal)}</td>
+                  <td style={{ ...TD, textAlign: 'right', color: '#c0392b' }}>฿{formatCurrency(outstandingSignTotal)}</td>
                   <td colSpan={editMode ? 2 : 1} style={TD}></td>
                 </tr>
               </tfoot>
