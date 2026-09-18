@@ -187,6 +187,132 @@ select.input-field {
 
 .table-row-hover:hover { background: rgba(124,92,191,0.04); }
 
+/* Annual taxpayer register: keep identifiers and the two-level heading visible. */
+.annual-taxpayer-page .annual-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-gutter: stable;
+}
+
+.annual-taxpayer-page .annual-taxpayer-table {
+  min-width: 1900px;
+}
+
+.annual-taxpayer-page .annual-taxpayer-table thead th {
+  position: sticky;
+  z-index: 8;
+  background: #f4f0fb !important;
+  box-shadow: inset 0 -1px 0 rgba(180, 165, 230, 0.32);
+}
+
+.annual-taxpayer-page .annual-taxpayer-table thead tr:first-child th {
+  top: 60px;
+  height: 42px;
+}
+
+.annual-taxpayer-page .annual-taxpayer-table thead tr:nth-child(2) th {
+  top: 102px;
+  height: 42px;
+}
+
+.annual-taxpayer-page .annual-taxpayer-table thead tr:first-child th:nth-child(1),
+.annual-taxpayer-page .annual-taxpayer-table tbody td:nth-child(1),
+.annual-taxpayer-page .annual-taxpayer-table tfoot td:nth-child(1) {
+  position: sticky;
+  left: 0;
+  min-width: 54px;
+  width: 54px;
+  z-index: 5;
+  background: rgba(255, 255, 255, 0.98);
+}
+
+.annual-taxpayer-page .annual-taxpayer-table thead tr:first-child th:nth-child(2),
+.annual-taxpayer-page .annual-taxpayer-table tbody td:nth-child(2) {
+  position: sticky;
+  left: 54px;
+  min-width: 120px;
+  width: 120px;
+  z-index: 5;
+  background: rgba(255, 255, 255, 0.98);
+}
+
+.annual-taxpayer-page .annual-taxpayer-table thead tr:first-child th:nth-child(3),
+.annual-taxpayer-page .annual-taxpayer-table tbody td:nth-child(3) {
+  position: sticky;
+  left: 174px;
+  min-width: 220px;
+  width: 220px;
+  z-index: 5;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 3px 0 8px rgba(70, 48, 110, 0.08);
+}
+
+.annual-taxpayer-page .annual-taxpayer-table thead tr:first-child th:nth-child(-n+3) {
+  z-index: 12;
+  background: #f4f0fb !important;
+}
+
+.annual-taxpayer-page .annual-taxpayer-table .table-row-hover:hover > td:nth-child(-n+3) {
+  background: #f8f5fc;
+}
+
+.report-page .report-detail-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-gutter: stable;
+}
+
+.report-page .report-detail-table {
+  min-width: 1320px;
+}
+
+.report-page .report-detail-table thead th {
+  position: sticky;
+  top: 60px;
+  z-index: 8;
+  background: #f4f0fb !important;
+  box-shadow: inset 0 -1px 0 rgba(180, 165, 230, 0.32);
+}
+
+.report-page .report-detail-table thead th:nth-child(1),
+.report-page .report-detail-table tbody td:nth-child(1) {
+  position: sticky;
+  left: 0;
+  min-width: 52px;
+  z-index: 5;
+  background: rgba(255, 255, 255, 0.98);
+}
+
+.report-page .report-detail-table thead th:nth-child(2),
+.report-page .report-detail-table tbody td:nth-child(2) {
+  position: sticky;
+  left: 52px;
+  min-width: 120px;
+  z-index: 5;
+  background: rgba(255, 255, 255, 0.98);
+}
+
+.report-page .report-detail-table thead th:nth-child(3),
+.report-page .report-detail-table tbody td:nth-child(3) {
+  position: sticky;
+  left: 172px;
+  min-width: 220px;
+  z-index: 5;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 3px 0 8px rgba(70, 48, 110, 0.08);
+}
+
+.report-page .report-detail-table thead th:nth-child(-n+3) {
+  z-index: 12;
+  background: #f4f0fb !important;
+}
+
+.report-page .report-detail-table .table-row-hover:hover > td:nth-child(-n+3) {
+  background: #f8f5fc;
+}
+
 .sidebar-item {
   display: flex;
   align-items: center;
@@ -821,6 +947,7 @@ select.input-field {
 
   .annual-taxpayer-page .annual-taxpayer-table th,
   .annual-taxpayer-page .annual-taxpayer-table td {
+    position: static !important;
     padding: 2px 2px !important;
     color: #000 !important;
     background: #fff !important;

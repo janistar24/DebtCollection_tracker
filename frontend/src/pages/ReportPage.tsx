@@ -22,20 +22,22 @@ export default function ReportPage() {
   )
 
   const filtered = useMemo(() => taxpayers.filter(tp => {
-    if (!tp.assessments.some(a => a.year === selectedYear)) return false
+    if (!tp.assessments.some(a => a.year === selectedYear) && getAccumulatedRemaining(tp, selectedYear) <= 0) return false
     if (!isDirector && tp.group !== currentUser?.group) return false
     if (groupFilter !== 'all' && tp.group !== groupFilter) return false
     if (statusFilter !== 'all' && getPaymentStatus(tp, selectedYear) !== statusFilter) return false
     if (personTypeFilter !== 'all' && tp.type !== personTypeFilter) return false
     const assessment = tp.assessments.find(a => a.year === selectedYear)
-    if (taxTypeFilter === 'land' && (assessment?.landAmount ?? 0) <= 0) return false
-    if (taxTypeFilter === 'sign' && (assessment?.signAmount ?? 0) <= 0) return false
+    if (taxTypeFilter === 'land' && (assessment?.landAmount ?? 0) <= 0 && getAccumulatedRemainingByType(tp, selectedYear, 'land') <= 0) return false
+    if (taxTypeFilter === 'sign' && (assessment?.signAmount ?? 0) <= 0 && getAccumulatedRemainingByType(tp, selectedYear, 'sign') <= 0) return false
     return true
   }), [taxpayers, selectedYear, isDirector, currentUser, groupFilter, statusFilter, taxTypeFilter, personTypeFilter])
 
   const totalAssessed = filtered.reduce((sum, tp) => sum + getTotalAssessed(tp, selectedYear), 0)
-  const totalRemaining = filtered.reduce((sum, tp) => sum + getTotalRemaining(tp, selectedYear), 0)
-  const totalPaid = totalAssessed - totalRemaining
+  const totalCurrentRemaining = filtered.reduce((sum, tp) => sum + getTotalRemaining(tp, selectedYear), 0)
+  const totalPaid = totalAssessed - totalCurrentRemaining
+  const totalPriorOutstanding = filtered.reduce((sum, tp) => sum + getPriorOutstanding(tp, selectedYear), 0)
+  const totalRemaining = filtered.reduce((sum, tp) => sum + getAccumulatedRemaining(tp, selectedYear), 0)
   const paidCount = filtered.filter(tp => getPaymentStatus(tp, selectedYear) === 'paid').length
   const partialCount = filtered.filter(tp => getPaymentStatus(tp, selectedYear) === 'partial').length
   const unpaidCount = filtered.filter(tp => getPaymentStatus(tp, selectedYear) === 'unpaid').length
@@ -90,7 +92,7 @@ export default function ReportPage() {
     </section>
 
     <section className="report-kpis" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: 12, marginBottom: 14 }}>
-      <Kpi label="ยอดภาษีทั้งหมด" value={`฿${formatCurrency(totalAssessed)}`} color="#2d2545" /><Kpi label="รับชำระแล้ว" value={`฿${formatCurrency(totalPaid)}`} color="#1a8f5a" /><Kpi label="ยอดคงเหลือ" value={`฿${formatCurrency(totalRemaining)}`} color="#c0392b" /><Kpi label="ผู้ที่ยังมียอดค้าง" value={`${partialCount + unpaidCount} ราย`} color="#7c5cbf" />
+      <Kpi label={`ยอดประเมินปี ${selectedYear}`} value={`฿${formatCurrency(totalAssessed)}`} color="#2d2545" /><Kpi label="รับชำระของยอดปีปัจจุบัน" value={`฿${formatCurrency(totalPaid)}`} color="#1a8f5a" /><Kpi label="หนี้ค้างจากปีก่อน" value={`฿${formatCurrency(totalPriorOutstanding)}`} color="#9a6800" /><Kpi label="ยอดค้างชำระสะสม" value={`฿${formatCurrency(totalRemaining)}`} color="#c0392b" /><Kpi label="ผู้ที่ยังมียอดค้าง" value={`${partialCount + unpaidCount} ราย`} color="#7c5cbf" />
     </section>
 
     <section className="report-visualizations" style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 14, marginBottom: 18 }}>
@@ -142,7 +144,7 @@ export default function ReportPage() {
       </div>
     </section>
 
-    <div className="glass-card no-print" style={{ padding: 0, overflow: 'hidden' }}><div style={{ padding: '14px 20px', borderBottom: '1px solid rgba(200,190,240,.25)', display: 'flex', justifyContent: 'space-between' }}><b>รายละเอียดผู้เสียภาษี</b><span style={{ fontSize: 12, color: '#a89cc8' }}>{filtered.length} รายการ</span></div>{filtered.length === 0 ? <EmptyState icon="📊" title="ไม่พบข้อมูลตามเงื่อนไขที่กำหนด" /> : <div style={{ overflowX: 'auto' }}><table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}><thead><tr style={{ background: 'rgba(240,236,251,.5)' }}>{['#','รหัส','ชื่อ','ประเภทภาษี','ยอดประเมิน','ยอดชำระ','ยอดคงเหลือ','ผู้รับผิดชอบ','สถานะ'].map(h => <th key={h} style={TH}>{h}</th>)}</tr></thead><tbody>{filtered.map((tp, i) => { const a=tp.assessments.find(x=>x.year===selectedYear); const assessed=getTotalAssessed(tp,selectedYear); const remaining=getTotalRemaining(tp,selectedYear); const taxTypes=[a?.landAmount?'ภาษีที่ดินและสิ่งปลูกสร้าง':null,a?.signAmount?'ป้าย':null].filter(Boolean).join('+'); return <tr key={tp.id} style={{ borderBottom:'1px solid rgba(200,190,240,.15)' }}><td style={TD}>{i+1}</td><td style={{...TD,fontFamily:'monospace',fontSize:11,color:'#7c5cbf'}}>{tp.ownerCode}</td><td style={TD}>{getTaxpayerName(tp)}</td><td style={TD}>{taxTypes||'-'}</td><td style={{...TD,textAlign:'right'}}>฿{formatCurrency(assessed)}</td><td style={{...TD,textAlign:'right',color:'#1a8f5a'}}>฿{formatCurrency(assessed-remaining)}</td><td style={{...TD,textAlign:'right',color:remaining?'#c0392b':'#1a8f5a'}}>฿{formatCurrency(remaining)}</td><td style={TD}>{users.find(user => user.id === tp.responsibleOfficer)?.name??'-'}</td><td style={TD}><StatusBadge status={getPaymentStatus(tp,selectedYear)} size="sm" /></td></tr> })}</tbody><tfoot><tr style={{background:'rgba(240,236,251,.5)',fontWeight:700}}><td colSpan={4} style={TD}>รวม {filtered.length} ราย</td><td style={{...TD,textAlign:'right'}}>฿{formatCurrency(totalAssessed)}</td><td style={{...TD,textAlign:'right',color:'#1a8f5a'}}>฿{formatCurrency(totalPaid)}</td><td style={{...TD,textAlign:'right',color:'#c0392b'}}>฿{formatCurrency(totalRemaining)}</td><td colSpan={2} /></tr></tfoot></table></div>}</div>
+    <div className="glass-card no-print" style={{ padding: 0, overflow: 'visible' }}><div style={{ padding: '14px 20px', borderBottom: '1px solid rgba(200,190,240,.25)', display: 'flex', justifyContent: 'space-between' }}><b>รายละเอียดผู้เสียภาษี</b><span style={{ fontSize: 12, color: '#a89cc8' }}>{filtered.length} รายการ</span></div>{filtered.length === 0 ? <EmptyState icon="📊" title="ไม่พบข้อมูลตามเงื่อนไขที่กำหนด" /> : <div className="report-detail-table-wrap" onWheel={event => { if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) { event.preventDefault(); window.scrollBy({ top: event.deltaY, behavior: 'auto' }) } }}><table className="report-detail-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}><thead><tr style={{ background: 'rgba(240,236,251,.5)' }}>{['#','รหัส','ชื่อ','ประเภทภาษี','ยอดประเมินปีปัจจุบัน','รับชำระปีปัจจุบัน','หนี้ค้างปีก่อน','ยอดค้างชำระสะสม','ผู้รับผิดชอบ','สถานะ'].map(h => <th key={h} style={TH}>{h}</th>)}</tr></thead><tbody>{filtered.map((tp, i) => { const a=tp.assessments.find(x=>x.year===selectedYear); const assessed=getTotalAssessed(tp,selectedYear); const currentRemaining=getTotalRemaining(tp,selectedYear); const priorOutstanding=getPriorOutstanding(tp,selectedYear); const accumulatedRemaining=getAccumulatedRemaining(tp,selectedYear); const taxTypes=[(a?.landAmount||getAccumulatedRemainingByType(tp,selectedYear,'land'))?'ภาษีที่ดินและสิ่งปลูกสร้าง':null,(a?.signAmount||getAccumulatedRemainingByType(tp,selectedYear,'sign'))?'ป้าย':null].filter(Boolean).join('+'); return <tr key={tp.id} className="table-row-hover" style={{ borderBottom:'1px solid rgba(200,190,240,.15)' }}><td style={TD}>{i+1}</td><td style={{...TD,fontFamily:'monospace',fontSize:11,color:'#7c5cbf'}}>{tp.ownerCode}</td><td style={TD}>{getTaxpayerName(tp)}</td><td style={TD}>{taxTypes||'-'}</td><td style={{...TD,textAlign:'right'}}>฿{formatCurrency(assessed)}</td><td style={{...TD,textAlign:'right',color:'#1a8f5a'}}>฿{formatCurrency(assessed-currentRemaining)}</td><td style={{...TD,textAlign:'right',color:priorOutstanding?'#9a6800':'#a89cc8'}}>{priorOutstanding?`฿${formatCurrency(priorOutstanding)}`:'-'}</td><td style={{...TD,textAlign:'right',fontWeight:700,color:accumulatedRemaining?'#c0392b':'#1a8f5a'}}>฿{formatCurrency(accumulatedRemaining)}</td><td style={TD}>{users.find(user => user.id === tp.responsibleOfficer)?.name??'-'}</td><td style={TD}><StatusBadge status={getPaymentStatus(tp,selectedYear)} size="sm" /></td></tr> })}</tbody><tfoot><tr style={{background:'rgba(240,236,251,.5)',fontWeight:700}}><td colSpan={4} style={TD}>รวม {filtered.length} ราย</td><td style={{...TD,textAlign:'right'}}>฿{formatCurrency(totalAssessed)}</td><td style={{...TD,textAlign:'right',color:'#1a8f5a'}}>฿{formatCurrency(totalPaid)}</td><td style={{...TD,textAlign:'right',color:'#9a6800'}}>฿{formatCurrency(totalPriorOutstanding)}</td><td style={{...TD,textAlign:'right',color:'#c0392b'}}>฿{formatCurrency(totalRemaining)}</td><td colSpan={2} /></tr></tfoot></table></div>}</div>
 
   </div>
 }
@@ -174,10 +176,27 @@ function getTotalRemaining(tp: Taxpayer, taxYear: number) {
   return Math.max(0, assessment.landAmount - landPaid) + Math.max(0, assessment.signAmount - signPaid)
 }
 
+function getAccumulatedRemainingByType(tp: Taxpayer, taxYear: number, type: 'land' | 'sign') {
+  return tp.assessments.filter(item => item.year <= taxYear).reduce((sum, assessment) => {
+    const payments = paymentsForYear(tp, assessment.year)
+    const paid = payments.reduce((paidSum, payment) => paidSum + (type === 'land' ? payment.allocatedLand : payment.allocatedSign), 0)
+    const assessed = type === 'land' ? assessment.landAmount : assessment.signAmount
+    return sum + Math.max(0, assessed - paid)
+  }, 0)
+}
+
+function getAccumulatedRemaining(tp: Taxpayer, taxYear: number) {
+  return getAccumulatedRemainingByType(tp, taxYear, 'land') + getAccumulatedRemainingByType(tp, taxYear, 'sign')
+}
+
+function getPriorOutstanding(tp: Taxpayer, taxYear: number) {
+  return tp.assessments.filter(item => item.year < taxYear).reduce((sum, assessment) => sum + getTotalRemaining(tp, assessment.year), 0)
+}
+
 function getPaymentStatus(tp: Taxpayer, taxYear: number): 'paid' | 'partial' | 'unpaid' {
-  const assessed = getTotalAssessed(tp, taxYear)
+  const assessed = tp.assessments.filter(item => item.year <= taxYear).reduce((sum, item) => sum + item.landAmount + item.signAmount, 0)
   if (assessed === 0) return 'paid'
-  const remaining = getTotalRemaining(tp, taxYear)
+  const remaining = getAccumulatedRemaining(tp, taxYear)
   if (remaining === 0) return 'paid'
   return remaining < assessed ? 'partial' : 'unpaid'
 }

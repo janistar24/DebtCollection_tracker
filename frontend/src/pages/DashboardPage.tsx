@@ -34,6 +34,21 @@ const PAYMENT_FILTER_LABELS = [
 
 type FollowFilterKey = typeof FOLLOW_FILTER_LABELS[number]['key']
 type PaymentFilterKey = typeof PAYMENT_FILTER_LABELS[number]['key']
+
+const getOutstandingStatusThroughYear = (tp: Parameters<typeof getOutstandingYears>[0], year: number) => {
+  const assessments = tp.assessments.filter(item => item.year <= year)
+  const assessed = assessments.reduce((sum, item) => sum + item.landAmount + item.signAmount, 0)
+  const outstanding = getOutstandingYears(tp, year)
+    .reduce((sum, item) => sum + item.landRemaining + item.signRemaining, 0)
+  if (outstanding <= 0) return 'paid' as const
+  return outstanding < assessed ? 'partial' as const : 'unpaid' as const
+}
+
+const getOutstandingByTypeThroughYear = (tp: Parameters<typeof getOutstandingYears>[0], year: number, type: 'land' | 'sign') =>
+  getOutstandingYears(tp, year).reduce((sum, item) => sum + (type === 'land' ? item.landRemaining : item.signRemaining), 0)
+
+const getPriorOutstandingThroughYear = (tp: Parameters<typeof getOutstandingYears>[0], year: number) =>
+  getOutstandingYears(tp, year).reduce((sum, item) => sum + (item.assessment.year < year ? item.landRemaining + item.signRemaining : 0), 0)
 type TaskScopeKey = typeof TASK_SCOPE_LABELS[number]['key']
 
 const DONUT_COLORS = ['#7c5cbf', '#c4b5f0', '#f0a0a0']
@@ -302,8 +317,7 @@ function CallLogModal({ onClose, onSave }: { onClose: () => void; onSave: (fu: O
 
   const contactCandidates = taxpayers
     .filter(tp => isManager || tp.group === currentUser?.group)
-    .filter(tp => tp.assessments.some(a => a.year === selectedYear))
-    .filter(tp => getTotalRemaining(tp, selectedYear) > 0)
+    .filter(tp => getOutstandingYears(tp, selectedYear).length > 0)
     .sort((a, b) => {
       const aNever = yearFollowUps(a).length === 0 ? 0 : 1
       const bNever = yearFollowUps(b).length === 0 ? 0 : 1
@@ -330,9 +344,10 @@ function CallLogModal({ onClose, onSave }: { onClose: () => void; onSave: (fu: O
   })
 
   const selected = contactCandidates.find(tp => tp.id === selectedId) ?? visibleCandidates[0] ?? null
-  const selectedAssessment = selected ? getAssessment(selected, selectedYear) : null
-  const landRemaining = selected ? getLandRemaining(selected, selectedYear) : 0
-  const signRemaining = selected ? getSignRemaining(selected, selectedYear) : 0
+  const selectedOutstanding = selected ? getOutstandingYears(selected, selectedYear) : []
+  const landRemaining = selectedOutstanding.reduce((sum, item) => sum + item.landRemaining, 0)
+  const signRemaining = selectedOutstanding.reduce((sum, item) => sum + item.signRemaining, 0)
+  const totalSelectedOutstanding = landRemaining + signRemaining
   const selectedHistory = selected
     ? [...yearFollowUps(selected)].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 4)
     : []
@@ -398,7 +413,7 @@ function CallLogModal({ onClose, onSave }: { onClose: () => void; onSave: (fu: O
               borderLeft: '1px solid rgba(180,165,210,0.45)', paddingLeft: 14,
               fontSize: 11, color: '#9487b4', whiteSpace: 'nowrap',
             }}>
-              ปีภาษี {selectedYear}{!isManager && ` · กลุ่ม ${currentUser?.group}`} · ผู้มียอดค้าง {contactCandidates.length} ราย
+              ยอดค้างถึงปีภาษี {selectedYear}{!isManager && ` · กลุ่ม ${currentUser?.group}`} · ผู้มียอดค้าง {contactCandidates.length} ราย
             </div>
           </div>
 
@@ -509,12 +524,12 @@ function CallLogModal({ onClose, onSave }: { onClose: () => void; onSave: (fu: O
                         </div>
                       )}
                       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 7 }}>
-                        {(selectedAssessment?.landAmount ?? 0) > 0 && (
+                        {landRemaining > 0 && (
                           <span style={{ background: '#f0ecfb', color: '#5f4399', borderRadius: 7, padding: '4px 7px', fontSize: 11 }}>
                             🏠 ภาษีที่ดินและสิ่งปลูกสร้าง ฿{formatCurrency(landRemaining)}
                           </span>
                         )}
-                        {(selectedAssessment?.signAmount ?? 0) > 0 && (
+                        {signRemaining > 0 && (
                           <span style={{ background: '#f0ecfb', color: '#5f4399', borderRadius: 7, padding: '4px 7px', fontSize: 11 }}>
                             🪧 ภาษีป้าย ฿{formatCurrency(signRemaining)}
                           </span>
@@ -523,7 +538,8 @@ function CallLogModal({ onClose, onSave }: { onClose: () => void; onSave: (fu: O
                     </div>
                     <div style={{ textAlign: 'right', flexShrink: 0 }}>
                       <div style={{ fontSize: 11, color: '#a89cc8' }}>ยอดคงเหลือ</div>
-                      <div style={{ fontSize: 18, fontWeight: 700, color: '#c0392b' }}>฿{formatCurrency(getTotalRemaining(selected, selectedYear))}</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: '#c0392b' }}>฿{formatCurrency(totalSelectedOutstanding)}</div>
+                      <div style={{ fontSize: 10, color: '#a89cc8', marginTop: 2 }}>รวมทุกปีภาษี</div>
                     </div>
                   </div>
 
@@ -651,23 +667,27 @@ export default function DashboardPage() {
   const isAdmin = currentUser?.role === 'admin'
   const canWrite = currentUser != null
   const myTaxpayers = isDirector ? taxpayers : taxpayers.filter(tp => tp.group === currentUser?.group)
+  const trackedTaxpayers = myTaxpayers.filter(tp => tp.assessments.some(a => a.year === selectedYear) || getOutstandingYears(tp, selectedYear).length > 0)
 
-  const totalCount = myTaxpayers.filter(tp => !!tp.assessments.find(a => a.year === selectedYear)).length
-  const paidCount = myTaxpayers.filter(tp => getPaymentStatus(tp, selectedYear) === 'paid').length
-  const partialCount = myTaxpayers.filter(tp => getPaymentStatus(tp, selectedYear) === 'partial').length
-  const unpaidCount = myTaxpayers.filter(tp => getPaymentStatus(tp, selectedYear) === 'unpaid').length
+  const totalCount = trackedTaxpayers.length
+  const paidCount = trackedTaxpayers.filter(tp => getOutstandingStatusThroughYear(tp, selectedYear) === 'paid').length
+  const partialCount = trackedTaxpayers.filter(tp => getOutstandingStatusThroughYear(tp, selectedYear) === 'partial').length
+  const unpaidCount = trackedTaxpayers.filter(tp => getOutstandingStatusThroughYear(tp, selectedYear) === 'unpaid').length
 
   const landTotal = myTaxpayers.reduce((s, tp) => s + (tp.assessments.find(a => a.year === selectedYear)?.landAmount ?? 0), 0)
-  const landRemaining = myTaxpayers.reduce((s, tp) => s + getLandRemaining(tp, selectedYear), 0)
+  const landCurrentRemaining = myTaxpayers.reduce((s, tp) => s + getLandRemaining(tp, selectedYear), 0)
+  const landRemaining = myTaxpayers.reduce((s, tp) => s + getOutstandingByTypeThroughYear(tp, selectedYear, 'land'), 0)
   const signTotal = myTaxpayers.reduce((s, tp) => s + (tp.assessments.find(a => a.year === selectedYear)?.signAmount ?? 0), 0)
-  const signRemaining = myTaxpayers.reduce((s, tp) => s + getSignRemaining(tp, selectedYear), 0)
+  const signCurrentRemaining = myTaxpayers.reduce((s, tp) => s + getSignRemaining(tp, selectedYear), 0)
+  const signRemaining = myTaxpayers.reduce((s, tp) => s + getOutstandingByTypeThroughYear(tp, selectedYear, 'sign'), 0)
   const totalAssessed = landTotal + signTotal
   const totalRemaining = landRemaining + signRemaining
-  const totalPaid = totalAssessed - totalRemaining
+  const totalPriorOutstanding = myTaxpayers.reduce((s, tp) => s + getPriorOutstandingThroughYear(tp, selectedYear), 0)
+  const totalPaid = totalAssessed - landCurrentRemaining - signCurrentRemaining
 
   const paidPct = totalAssessed > 0 ? Math.round((totalPaid / totalAssessed) * 100) : 0
-  const landPaid = landTotal - landRemaining
-  const signPaid = signTotal - signRemaining
+  const landPaid = landTotal - landCurrentRemaining
+  const signPaid = signTotal - signCurrentRemaining
   const landPct = landTotal > 0 ? Math.round((landPaid / landTotal) * 100) : 0
   const signPct = signTotal > 0 ? Math.round((signPaid / signTotal) * 100) : 0
 
@@ -677,24 +697,25 @@ export default function DashboardPage() {
     { name: 'ยังไม่ชำระ', value: unpaidCount, pct: totalCount > 0 ? Math.round(unpaidCount / totalCount * 100) : 0 },
   ]
 
-  const noneCount = myTaxpayers.filter(tp => getFollowStatus(tp, selectedYear) === 'none' && getPaymentStatus(tp, selectedYear) !== 'paid').length
+  const noneCount = trackedTaxpayers.filter(tp => getFollowStatus(tp, selectedYear) === 'none' && getOutstandingStatusThroughYear(tp, selectedYear) !== 'paid').length
   const promisedCount = myTaxpayers.filter(tp => getFollowStatus(tp, selectedYear) === 'promised').length
 
   // Director group stats
   const groups = ['ก-น', 'บ-ล', 'ส-ศ', 'ว-ฮ และบริษัท'] as const
   const groupStats = groups.map(g => {
-    const tps = taxpayers.filter(tp => tp.group === g && !!tp.assessments.find(a => a.year === selectedYear))
+    const tps = taxpayers.filter(tp => tp.group === g && (tp.assessments.some(a => a.year === selectedYear) || getOutstandingYears(tp, selectedYear).length > 0))
     const officer = tps[0] ? users.find(user => user.id === tps[0].responsibleOfficer) : undefined
-    const totalRem = tps.reduce((s, tp) => s + getTotalRemaining(tp, selectedYear), 0)
+    const totalRem = tps.reduce((s, tp) => s + getOutstandingYears(tp, selectedYear).reduce((subtotal, item) => subtotal + item.landRemaining + item.signRemaining, 0), 0)
     const totalAss = tps.reduce((s, tp) => s + getTotalAssessed(tp, selectedYear), 0)
-    const totalPaidG = totalAss - totalRem
-    const paidG = tps.filter(tp => getPaymentStatus(tp, selectedYear) === 'paid').length
-    const unpaidG = tps.filter(tp => getPaymentStatus(tp, selectedYear) !== 'paid').length
-    const noFollow = tps.filter(tp => getFollowStatus(tp, selectedYear) === 'none' && getPaymentStatus(tp, selectedYear) !== 'paid').length
+    const currentRemG = tps.reduce((s, tp) => s + getTotalRemaining(tp, selectedYear), 0)
+    const totalPaidG = totalAss - currentRemG
+    const paidG = tps.filter(tp => getOutstandingStatusThroughYear(tp, selectedYear) === 'paid').length
+    const unpaidG = tps.filter(tp => getOutstandingStatusThroughYear(tp, selectedYear) !== 'paid').length
+    const noFollow = tps.filter(tp => getFollowStatus(tp, selectedYear) === 'none' && getOutstandingStatusThroughYear(tp, selectedYear) !== 'paid').length
     const contacted = unpaidG - noFollow
     const overdue = tps.filter(tp => {
       const lastFu = getLastFollowUp(tp, selectedYear)
-      return lastFu?.promiseDate && lastFu.promiseDate < new Date().toISOString().slice(0, 10) && getPaymentStatus(tp, selectedYear) !== 'paid'
+      return lastFu?.promiseDate && lastFu.promiseDate < new Date().toISOString().slice(0, 10) && getOutstandingStatusThroughYear(tp, selectedYear) !== 'paid'
     }).length
     const pctG = totalAss > 0 ? Math.round(totalPaidG / totalAss * 100) : 0
     return { group: g, tps, officer, totalRem, totalPaidG, totalAss, pctG, paidG, unpaidG, noFollow, contacted, overdue, total: tps.length }
@@ -727,9 +748,8 @@ export default function DashboardPage() {
   // Task List มีเฉพาะผู้ที่เคยถูกติดต่อแล้วและยังมียอดค้าง
   // แบ่งเป็น: ติดต่อวันนี้ และงานจากวันก่อนที่ยังปิดยอดไม่ได้
   const taskTaxpayers = myTaxpayers.filter(tp => {
-    const payStat = getPaymentStatus(tp, selectedYear)
-    const hasSelectedYear = tp.assessments.some(a => a.year === selectedYear)
-    return hasSelectedYear && payStat !== 'paid' && followUpsForYear(tp).length > 0
+    const hasOutstandingDebt = getOutstandingYears(tp, selectedYear).length > 0
+    return hasOutstandingDebt && followUpsForYear(tp).length > 0
   })
 
   const contactedTodayCount = taskTaxpayers.filter(tp =>
@@ -757,7 +777,7 @@ export default function DashboardPage() {
   const previousPendingCount = taskTaxpayers.length - contactedTodayCount
 
   const filteredTps = taskTaxpayers.filter(tp => {
-    const payStat = getPaymentStatus(tp, selectedYear)
+    const payStat = getOutstandingStatusThroughYear(tp, selectedYear)
     const lastFu = getLastFollowUp(tp, selectedYear)
     const contactedToday = followUpsForYear(tp).some(fu => getLocalDateKey(fu.date) === todayKey)
 
@@ -1053,16 +1073,17 @@ export default function DashboardPage() {
           {/* ตัวเลขภาพรวม: ใช้ข้อมูลจริงจาก assessments และ payments */}
           <div style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+            gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
             gap: 12,
             paddingBottom: 16,
             marginBottom: 14,
             borderBottom: '1px solid rgba(200,190,240,0.25)',
           }}>
             {[
-              { label: 'ยอดภาษีทั้งหมด', value: totalAssessed, color: '#2d2545' },
-              { label: 'รับชำระแล้ว', value: totalPaid, color: '#1a8f5a' },
-              { label: 'ยอดคงเหลือ', value: totalRemaining, color: '#c0392b' },
+              { label: `ยอดประเมินปี ${selectedYear}`, value: totalAssessed, color: '#2d2545' },
+              { label: 'รับชำระของยอดปีปัจจุบัน', value: totalPaid, color: '#1a8f5a' },
+              { label: 'หนี้ค้างจากปีก่อน', value: totalPriorOutstanding, color: '#9a6800' },
+              { label: 'ยอดค้างชำระสะสม', value: totalRemaining, color: '#c0392b' },
             ].map(item => (
               <div key={item.label} style={{ minWidth: 0 }}>
                 <div style={{ fontSize: 11, color: '#a89cc8', marginBottom: 4 }}>{item.label}</div>
@@ -1141,12 +1162,12 @@ export default function DashboardPage() {
                   </span>
                 </div>
 
-                <div style={{ fontSize: 11, color: '#a89cc8', marginBottom: 2 }}>ยอดคงเหลือ</div>
+                <div style={{ fontSize: 11, color: '#a89cc8', marginBottom: 2 }}>ยอดค้างชำระสะสม</div>
                 <div style={{ fontSize: 20, fontWeight: 800, color: '#2d2545', lineHeight: 1.2 }}>
                   ฿{formatCurrency(tax.remaining)}
                 </div>
                 <div style={{ fontSize: 10, color: '#9487b4', marginTop: 4 }}>
-                  รับแล้ว ฿{formatCurrency(tax.paid)} จาก ฿{formatCurrency(tax.total)}
+                  รับของปีปัจจุบันแล้ว ฿{formatCurrency(tax.paid)} · ประเมินปีนี้ ฿{formatCurrency(tax.total)}
                 </div>
 
                 <div style={{ height: 7, borderRadius: 99, background: 'rgba(255,255,255,0.9)', overflow: 'hidden', marginTop: 11 }}>
@@ -1402,23 +1423,22 @@ export default function DashboardPage() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr style={{ background: 'rgba(240,236,251,0.5)' }}>
-                  {['#', 'รหัส', 'ชื่อ-นามสกุล', 'ประเภทภาษี', 'ยอดประเมินปีปัจจุบัน', 'ยอดค้างชำระรวมทุกปี', 'ติดต่อล่าสุด', 'ผลการติดต่อ', 'วันนัด', 'สถานะ', ''].map(h => (
+                  {['#', 'รหัส', 'ชื่อ-นามสกุล', 'ประเภทภาษี', 'ยอดประเมินปีปัจจุบัน', 'ยอดค้างชำระรวมทุกปี', 'หมายเหตุหนี้', 'ติดต่อล่าสุด', 'ผลการติดต่อ', 'วันนัด', 'สถานะ', ''].map(h => (
                     <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 600, color: '#6b5b95', whiteSpace: 'nowrap', borderBottom: '1px solid rgba(200,190,240,0.25)', fontSize: 12 }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {filteredTps.map((tp, i) => {
-                  const assess = tp.assessments.find(a => a.year === selectedYear)
-                  const remaining = getTotalRemaining(tp, selectedYear)
                   const outstandingYears = getOutstandingYears(tp, selectedYear)
                   const totalOutstanding = outstandingYears.reduce((sum, item) => sum + item.landRemaining + item.signRemaining, 0)
+                  const priorOutstanding = outstandingYears.reduce((sum, item) => sum + (item.assessment.year < selectedYear ? item.landRemaining + item.signRemaining : 0), 0)
                   const installmentCount = getInstallmentCount(tp)
                   const lastFu = getLastFollowUp(tp, selectedYear)
-                  const payStat = getPaymentStatus(tp, selectedYear)
+                  const payStat = getOutstandingStatusThroughYear(tp, selectedYear)
                   const followStat = getFollowStatus(tp, selectedYear)
-                  const landRem2 = getLandRemaining(tp, selectedYear)
-                  const signRem2 = getSignRemaining(tp, selectedYear)
+                  const landRem2 = outstandingYears.reduce((sum, item) => sum + item.landRemaining, 0)
+                  const signRem2 = outstandingYears.reduce((sum, item) => sum + item.signRemaining, 0)
                   const remainingTypes = [landRem2 > 0 ? 'ภาษีที่ดินและสิ่งปลูกสร้าง' : null, signRem2 > 0 ? 'ภาษีป้าย' : null].filter(Boolean) as string[]
                   return (
                     <tr key={tp.id} className="table-row-hover" style={{ borderBottom: '1px solid rgba(200,190,240,0.15)' }}>
@@ -1428,7 +1448,6 @@ export default function DashboardPage() {
                         <button type="button" onClick={() => navigate(`/taxpayers/${tp.id}`)} style={{ border: 0, padding: 0, background: 'transparent', color: '#5c3d9e', font: 'inherit', fontWeight: 700, cursor: 'pointer', textAlign: 'left', textDecoration: 'underline', textDecorationColor: 'rgba(124,92,191,.3)', textUnderlineOffset: 3 }}>
                           {getTaxpayerName(tp)}
                         </button>
-                        {outstandingYears.some(item => item.assessment.year < selectedYear) && <div style={{ marginTop: 4 }}><span style={{ display: 'inline-block', padding: '2px 7px', borderRadius: 999, background: 'rgba(224,160,20,.10)', color: '#9a6800', fontSize: 10 }}>มีหนี้ค้างจากปีก่อน</span></div>}
                       </td>
                       <td style={{ padding: '10px 14px' }}>
                         {remainingTypes.length === 0
@@ -1440,16 +1459,17 @@ export default function DashboardPage() {
                             </div>
                         }
                       </td>
-                      <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 600, color: '#2d2545' }}>฿{formatCurrency(getTotalAssessed(tp, selectedYear))} บาท<div style={{ color: '#a89cc8', fontSize: 10, fontWeight: 500, marginTop: 2 }}>ปีภาษี {selectedYear}</div></td>
-                      <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 700, color: totalOutstanding > 0 ? '#c0392b' : '#1a8f5a' }}>฿{formatCurrency(totalOutstanding)} บาท<div style={{ color: '#a89cc8', fontSize: 10, fontWeight: 500, marginTop: 2 }}>ปีปัจจุบัน + หนี้ค้างปีก่อน</div></td>
+                      <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 600, color: '#2d2545', whiteSpace: 'nowrap' }}>฿{formatCurrency(getTotalAssessed(tp, selectedYear))} บาท</td>
+                      <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 700, color: totalOutstanding > 0 ? '#c0392b' : '#1a8f5a', whiteSpace: 'nowrap' }}>฿{formatCurrency(totalOutstanding)} บาท</td>
+                      <td style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>{priorOutstanding > 0 ? <span style={{ display: 'inline-block', padding: '3px 8px', borderRadius: 999, background: 'rgba(224,160,20,.10)', color: '#9a6800', fontSize: 10 }}>หนี้ค้างปีก่อน ฿{formatCurrency(priorOutstanding)}</span> : <span style={{ color: '#a89cc8' }}>-</span>}</td>
                       <td style={{ padding: '10px 14px', color: '#8873b5', fontSize: 12 }}>{lastFu ? formatDate(lastFu.date) : '-'}</td>
                       <td style={{ padding: '10px 14px', fontSize: 12, color: '#6b5b95', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lastFu?.detail ?? '-'}</td>
                       <td style={{ padding: '10px 14px', fontSize: 12, color: '#7c5cbf' }}>{lastFu?.promiseDate ? formatDate(lastFu.promiseDate) : '-'}</td>
                       <td style={{ padding: '10px 14px' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}>
                           <StatusBadge status={payStat} size="sm" />
-                          {installmentCount > 0 && <span style={{ color: '#8873b5', fontSize: 10 }}>ชำระล่าสุดงวดที่ {installmentCount}</span>}
                           {payStat !== 'paid' && <StatusBadge status={followStat} size="sm" />}
+                          {installmentCount > 0 && <span style={{ color: '#8873b5', fontSize: 10 }}>งวดล่าสุด {installmentCount}</span>}
                         </div>
                       </td>
                       <td style={{ padding: '10px 14px' }}>

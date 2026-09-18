@@ -963,7 +963,12 @@ const handleInlineAdd = async () => {
               : 'ไม่พบข้อมูลตามเงื่อนไขที่ระบุ กรุณาปรับตัวกรองแล้วลองอีกครั้ง'}
           />
         ) : (
-          <div className="annual-table-wrap" style={{ overflowX: 'auto' }}>
+          <div className="annual-table-wrap" onWheel={event => {
+            if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) {
+              event.preventDefault()
+              window.scrollBy({ top: event.deltaY, behavior: 'auto' })
+            }
+          }}>
             <table className="annual-taxpayer-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <colgroup>
                 <col className="col-number" />
@@ -976,21 +981,19 @@ const handleInlineAdd = async () => {
               </colgroup>
               <thead>
                 <tr style={{ background: 'rgba(240,236,251,0.6)' }}>
-                  <th style={TH}>#</th>
-                  <th style={TH}>รหัส</th>
-                  <th style={TH}>ชื่อ-นามสกุล / บริษัท</th>
+                  <th style={TH} rowSpan={2}>#</th>
+                  <th style={TH} rowSpan={2}>รหัส</th>
+                  <th style={TH} rowSpan={2}>ชื่อ-นามสกุล / บริษัท</th>
                   <th style={{ ...TH, textAlign: 'center' }} colSpan={5}>ภาษีที่ดินและสิ่งปลูกสร้าง</th>
                   <th style={{ ...TH, textAlign: 'center' }} colSpan={5}>ภาษีป้าย</th>
-                  <th style={TH}>หมายเหตุ</th>
-                  <th style={TH}>สถานะ</th>
-                  {editMode && <th style={{ ...TH, width: 40 }}></th>}
+                  <th style={TH} rowSpan={2}>หมายเหตุ</th>
+                  <th style={TH} rowSpan={2}>สถานะ</th>
+                  {editMode && <th style={{ ...TH, width: 40 }} rowSpan={2}></th>}
                 </tr>
 
                 <tr style={{ background: 'rgba(240,236,251,0.35)' }}>
-                  <th style={TH} colSpan={3}></th>
                   {['ยอดประเมินปีนี้', 'ยอดประเมินปีก่อน', 'เพิ่ม/ลด', 'หนี้ค้างปีก่อน', 'ยอดคงเหลือรวม'].map(h => <th key={`l${h}`} style={{ ...TH, fontWeight: 500, color: '#8873b5', fontSize: 11 }}>{h}</th>)}
                   {['ยอดประเมินปีนี้', 'ยอดประเมินปีก่อน', 'เพิ่ม/ลด', 'หนี้ค้างปีก่อน', 'ยอดคงเหลือรวม'].map(h => <th key={`s${h}`} style={{ ...TH, fontWeight: 500, color: '#8873b5', fontSize: 11 }}>{h}</th>)}
-                  <th style={TH} colSpan={editMode ? 3 : 2}></th>
                 </tr>
               </thead>
 

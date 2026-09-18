@@ -43,6 +43,7 @@ interface Candidate {
 
   diff: number
   exact: boolean
+  matchScope?: 'year' | 'cumulative'
 }
 
 type TaskSearchScope = 'all' | 'today' | 'previous'
@@ -69,6 +70,16 @@ const isInTaskScope = (tp: Taxpayer, year: number, scope: TaskSearchScope) => {
   const contactedToday = yearFollowUps.some(fu => getLocalDateKey(fu.date) === getLocalDateKey(new Date()))
   return scope === 'all' || (scope === 'today' && contactedToday) || (scope === 'previous' && !contactedToday)
 }
+
+const getAccumulatedOutstanding = (tp: Taxpayer, year: number) =>
+  getOutstandingYears(tp, year).reduce(
+    (sum, item) => sum + item.landRemaining + item.signRemaining, 0
+  )
+
+const getPriorYearOutstanding = (tp: Taxpayer, year: number) =>
+  getOutstandingYears(tp, year).reduce(
+    (sum, item) => sum + (item.assessment.year < year ? item.landRemaining + item.signRemaining : 0), 0
+  )
 
 export default function SearchPaymentPage() {
   const { taxpayers, addPayment, currentUser, selectedYear, refreshData } = useApp()
@@ -135,10 +146,11 @@ export default function SearchPaymentPage() {
     const pool = taxpayers.filter(tp => {
       if (!isDirector && tp.group !== currentUser?.group) return false
       if (groupFilter !== 'all' && tp.group !== groupFilter) return false
+      if (name && !getTaxpayerName(tp).toLowerCase().includes(name) && !tp.ownerCode.toLowerCase().includes(name) && !tp.phone.includes(name)) return false
       return isInTaskScope(tp, selectedYear, taskSearchScope)
     })
 
-  const results: Candidate[] = pool
+  const yearlyResults: Candidate[] = amt > 0 ? pool
     .flatMap(tp => getOutstandingYears(tp, selectedYear).flatMap(({ assessment: assess, landRemaining, signRemaining }) => {
       const totalRemaining = landRemaining + signRemaining
       const candidates: Candidate[] = []
@@ -181,7 +193,8 @@ export default function SearchPaymentPage() {
               diff,
 
               exact:
-                Math.abs(diff) < 0.01
+                Math.abs(diff) < 0.01,
+              matchScope: 'year'
             })
           }
         }
@@ -222,7 +235,8 @@ export default function SearchPaymentPage() {
               diff,
 
               exact:
-                Math.abs(diff) < 0.01
+                Math.abs(diff) < 0.01,
+              matchScope: 'year'
             })
           }
         }
@@ -264,15 +278,43 @@ export default function SearchPaymentPage() {
 
             diff,
 
-            exact:
-              Math.abs(diff) < 0.01
+              exact:
+                Math.abs(diff) < 0.01,
+              matchScope: 'year'
           })
         }
       }
 
 
       return candidates
-    }))
+    })) : []
+
+    const cumulativeResults: Candidate[] = (amt > 0 || !!name) ? pool.flatMap(tp => {
+      const accumulated = getAccumulatedOutstanding(tp, selectedYear)
+      const tolerance = amt > 0 ? Math.max(amt * 0.1, 5) : Number.POSITIVE_INFINITY
+      const diff = amt > 0 ? accumulated - amt : 0
+      if (accumulated <= 0 || Math.abs(diff) > tolerance) return []
+      const currentAssessment = tp.assessments.find(item => item.year === selectedYear)
+      return [{
+        tp,
+        taxYear: selectedYear,
+        taxType: 'both' as const,
+        assessedForType: (currentAssessment?.landAmount ?? 0) + (currentAssessment?.signAmount ?? 0),
+        remainingForType: accumulated,
+        totalRemaining: accumulated,
+        diff,
+        exact: amt > 0 && Math.abs(diff) < 0.01,
+        matchScope: 'cumulative' as const,
+      }]
+    }) : []
+
+    const results = [...yearlyResults, ...cumulativeResults]
+    .filter((candidate, index, all) => all.findIndex(other =>
+      other.tp.id === candidate.tp.id
+      && other.taxYear === candidate.taxYear
+      && other.taxType === candidate.taxType
+      && Math.abs(other.remainingForType - candidate.remainingForType) < 0.01
+    ) === index)
 
     .sort(
       (a, b) =>
@@ -663,7 +705,7 @@ export default function SearchPaymentPage() {
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                       <thead>
                         <tr style={{ background: 'rgba(240,236,251,0.5)' }}>
-                          {['#', 'รหัส', 'ชื่อ', 'ประเภทภาษี', 'ปีภาษี', 'ยอดภาษี', 'ประเภทภาษีที่ตรง', 'ชำระแล้ว', 'ยอดคงเหลือ', 'ส่วนต่าง', 'สถานะ', ''].map(h => (
+                          {['#', 'รหัส', 'ชื่อ', 'ประเภทภาษี', 'ปีภาษี', 'ยอดประเมิน', 'ประเภทภาษีที่ตรง', 'ชำระแล้ว', 'ยอดค้างรายการนี้', 'ยอดค้างชำระสะสม', 'ส่วนต่าง', 'สถานะ', ''].map(h => (
                             <th key={h} style={TH}>{h}</th>
                           ))}
                         </tr>
@@ -674,14 +716,16 @@ export default function SearchPaymentPage() {
                           const assess = tp.assessments.find(a => a.year === c.taxYear)
                           const assessed = getTotalAssessed(tp, c.taxYear)
                           const remaining = getTotalRemaining(tp, c.taxYear)
-                          const paid = assessed - remaining
+                          const accumulatedOutstanding = getAccumulatedOutstanding(tp, selectedYear)
+                          const accumulatedAssessed = tp.assessments.filter(item => item.year <= selectedYear).reduce((sum, item) => sum + item.landAmount + item.signAmount, 0)
+                          const paid = c.matchScope === 'cumulative' ? Math.max(0, accumulatedAssessed - accumulatedOutstanding) : assessed - remaining
                           const taxType = [assess?.landAmount ? 'ภาษีที่ดินและสิ่งปลูกสร้าง' : null, assess?.signAmount ? 'ป้าย' : null].filter(Boolean).join('+')
                           const isSelected = drawerTp?.id === tp.id && drawerTaxYear === c.taxYear
                           const diffSign = c.diff >= 0 ? '+' : ''
 
                           return (
                             <tr 
-                              key={`${tp.id}-${c.taxYear}-${c.taxType}`}
+                              key={`${tp.id}-${c.taxYear}-${c.taxType}-${c.matchScope ?? 'year'}`}
                               style={{
                                 borderBottom: '1px solid rgba(200,190,240,0.15)',
                                 background: isSelected ? 'rgba(124,92,191,0.06)' : undefined,
@@ -696,11 +740,12 @@ export default function SearchPaymentPage() {
                               <td style={{ ...TD, fontFamily: 'monospace', fontSize: 11, color: '#7c5cbf' }}>{tp.ownerCode}</td>
                               <td style={{ ...TD, fontWeight: 500, color: '#2d2545', whiteSpace: 'nowrap' }}>{getTaxpayerName(tp)}</td>
                               <td style={{ ...TD, fontSize: 12, color: '#6b5b95' }}>{taxType || '-'}</td>
-                              <td style={{ ...TD, fontSize: 12, color: '#a89cc8' }}>{c.taxYear}</td>
+                              <td style={{ ...TD, fontSize: 12, color: '#a89cc8' }}>{c.matchScope === 'cumulative' ? `ถึง ${selectedYear}` : c.taxYear}</td>
                               <td style={{ ...TD, textAlign: 'right' }}>฿{formatCurrency(c.assessedForType)}</td>
-                              <td style={{ ...TD, fontSize: 12, color: '#7c5cbf', fontWeight: 600 }}> {c.taxType === 'land' ? 'ภาษีที่ดินและสิ่งปลูกสร้าง' : c.taxType === 'sign' ? 'ภาษีป้าย' : 'ยอดรวม'} </td>
+                              <td style={{ ...TD, fontSize: 12, color: '#7c5cbf', fontWeight: 600 }}> {c.matchScope === 'cumulative' ? 'ยอดค้างสะสมทุกปี' : c.taxType === 'land' ? 'ภาษีที่ดินและสิ่งปลูกสร้าง' : c.taxType === 'sign' ? 'ภาษีป้าย' : 'ยอดรวม'} </td>
                               <td style={{ ...TD, textAlign: 'right', color: '#1a8f5a' }}>฿{formatCurrency(paid)}</td>
                               <td style={{ ...TD, textAlign: 'right', fontWeight: 700, color: '#c0392b' }}>฿{formatCurrency(c.remainingForType)}</td>
+                              <td style={{ ...TD, textAlign: 'right', fontWeight: 700, color: '#8a5a00' }}>฿{formatCurrency(accumulatedOutstanding)}{getPriorYearOutstanding(tp, selectedYear) > 0 && <div style={{ fontSize: 10, fontWeight: 500, color: '#a89cc8', marginTop: 2 }}>รวมหนี้ปีก่อน ฿{formatCurrency(getPriorYearOutstanding(tp, selectedYear))}</div>}</td>
                               <td style={{ ...TD, textAlign: 'right' }}>
                                 {c.exact ? (
                                   <span className="status-badge" style={{ background: '#e8fdf4', color: '#1a8f5a', fontSize: 11 }}>ยอดตรง</span>
@@ -711,7 +756,7 @@ export default function SearchPaymentPage() {
                                   }}>{diffSign}{formatCurrency(c.diff)}</span>
                                 )}
                               </td>
-                              <td style={TD}><StatusBadge status={getPaymentStatus(tp, c.taxYear)} size="sm" /></td>
+                              <td style={TD}><StatusBadge status={accumulatedOutstanding <= 0 ? 'paid' : paid > 0 ? 'partial' : 'unpaid'} size="sm" /></td>
                               <td style={TD}>
                                 <button className="btn-primary"
                                   onClick={() => { setDrawerTp(tp); setDrawerTaxYear(c.taxYear); setPayDate(new Date().toISOString().slice(0, 10)); setPayTime(new Date().toTimeString().slice(0, 5)); setPayRef(''); setPayReceipt(''); setPayMethod('transfer') }}
@@ -914,13 +959,13 @@ export default function SearchPaymentPage() {
                 {cashPool.length > 0 && !cashTp && (
                   <div style={{ marginTop: 4, background: 'white', border: '1px solid rgba(180,165,230,0.35)', borderRadius: 10, overflow: 'hidden', boxShadow: '0 4px 16px rgba(124,92,191,0.1)' }}>
                     {cashPool.map(tp => (
-                      <button key={tp.id} onClick={() => { setCashTp(tp); setCashSearch(getTaxpayerName(tp)); setCashAmt(String(getTotalRemaining(tp, selectedYear))) }}
+                      <button key={tp.id} onClick={() => { setCashTp(tp); setCashSearch(getTaxpayerName(tp)); setCashAmt(String(getAccumulatedOutstanding(tp, selectedYear))) }}
                         style={{ width: '100%', textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', cursor: 'pointer', fontFamily: "'Sarabun',sans-serif", fontSize: 13, borderBottom: '1px solid rgba(200,190,240,0.2)' }}
                         onMouseEnter={e => (e.currentTarget.style.background = 'rgba(124,92,191,0.05)')}
                         onMouseLeave={e => (e.currentTarget.style.background = 'none')}>
                         <span style={{ fontWeight: 500, color: '#2d2545' }}>{getTaxpayerName(tp)}</span>
                         <span style={{ color: '#a89cc8', fontSize: 11, marginLeft: 8, fontFamily: 'monospace' }}>{tp.ownerCode}</span>
-                        <span style={{ float: 'right', color: '#c0392b', fontWeight: 600 }}>฿{formatCurrency(getTotalRemaining(tp, selectedYear))}</span>
+                        <span style={{ float: 'right', color: '#c0392b', fontWeight: 600 }}>สะสม ฿{formatCurrency(getAccumulatedOutstanding(tp, selectedYear))}</span>
                       </button>
                     ))}
                   </div>
@@ -1007,13 +1052,13 @@ function DirectPaymentTab() {
     setSelectedTp(tp)
     setSearch(getTaxpayerName(tp))
     setShowSuggestions(false)
-    setAmt(String(getTotalRemaining(tp, selectedYear)))
+    setAmt(String(getAccumulatedOutstanding(tp, selectedYear)))
     // auto-detect tax type
     const a = tp.assessments.find(x => x.year === selectedYear)
     setTaxType((a?.landAmount ?? 0) > 0 && (a?.signAmount ?? 0) > 0 ? 'both' : (a?.landAmount ?? 0) > 0 ? 'land' : 'sign')
   }
 
-  const remaining = selectedTp ? getTotalRemaining(selectedTp, selectedYear) : 0
+  const remaining = selectedTp ? getAccumulatedOutstanding(selectedTp, selectedYear) : 0
   const payAmt = parseFloat(amt) || 0
 
   const handleSave = async () => {
@@ -1100,7 +1145,8 @@ function DirectPaymentTab() {
                   <div style={{ fontSize: 11, color: '#a89cc8', display: 'flex', gap: 10, marginTop: 2 }}>
                     <span style={{ fontFamily: 'monospace' }}>{tp.ownerCode}</span>
                     <span>{tp.phone}</span>
-                    <span style={{ color: '#c0392b', fontWeight: 600 }}>คงเหลือ ฿{formatCurrency(getTotalRemaining(tp, selectedYear))} บาท</span>
+                    <span style={{ color: '#c0392b', fontWeight: 600 }}>ค้างชำระสะสม ฿{formatCurrency(getAccumulatedOutstanding(tp, selectedYear))} บาท</span>
+                    {getPriorYearOutstanding(tp, selectedYear) > 0 && <span style={{ color: '#9a6800' }}>หนี้ปีก่อน ฿{formatCurrency(getPriorYearOutstanding(tp, selectedYear))}</span>}
                   </div>
                 </div>
               ))}

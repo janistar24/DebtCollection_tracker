@@ -213,14 +213,23 @@ export default function TaxpayerDetailPage() {
   )
 
   const officer = users.find(user => user.id === tp.responsibleOfficer)
-  const payStat = getPaymentStatus(tp, selectedYear)
+  const outstandingThroughYear = tp.assessments
+    .filter(item => item.year <= selectedYear)
+    .map(item => ({
+      assessment: item,
+      landRemaining: getLandRemaining(tp, item.year),
+      signRemaining: getSignRemaining(tp, item.year),
+    }))
+  const accumulatedRemaining = outstandingThroughYear.reduce((sum, item) => sum + item.landRemaining + item.signRemaining, 0)
+  const accumulatedAssessed = tp.assessments.filter(item => item.year <= selectedYear).reduce((sum, item) => sum + item.landAmount + item.signAmount, 0)
+  const payStat = accumulatedRemaining <= 0 ? 'paid' : accumulatedRemaining < accumulatedAssessed ? 'partial' : 'unpaid'
   const assess = tp.assessments.find(a => a.year === selectedYear)
   const landPaid = getLandPaid(tp, selectedYear)
   const signPaid = getSignPaid(tp, selectedYear)
   const landRem = getLandRemaining(tp, selectedYear)
   const signRem = getSignRemaining(tp, selectedYear)
   const historicalOutstanding = tp.assessments
-    .filter(item => item.year < CURRENT_YEAR)
+    .filter(item => item.year < selectedYear)
     .map(item => ({
       assessment: item,
       landRemaining: getLandRemaining(tp, item.year),
@@ -484,7 +493,7 @@ export default function TaxpayerDetailPage() {
                   <span style={{ fontSize: 13, fontWeight: 600, color: '#2d2545' }}>{t.label}</span>
                 </div>
                 <div style={{ display: 'grid', gap: 8 }}>
-                  {[['ยอดประเมิน', `฿${formatCurrency(t.assessed)}`, '#2d2545'], ['ชำระแล้ว', `฿${formatCurrency(t.paid)}`, '#1a8f5a'], ['ยอดคงเหลือ', `฿${formatCurrency(t.remaining)}`, t.remaining > 0 ? '#c0392b' : '#1a8f5a']].map(([lbl, val, col]) => (
+                  {[['ยอดประเมินปีปัจจุบัน', `฿${formatCurrency(t.assessed)}`, '#2d2545'], ['ชำระแล้วของปีปัจจุบัน', `฿${formatCurrency(t.paid)}`, '#1a8f5a'], ['คงเหลือของปีปัจจุบัน', `฿${formatCurrency(t.remaining)}`, t.remaining > 0 ? '#c0392b' : '#1a8f5a']].map(([lbl, val, col]) => (
                     <div key={String(lbl)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid rgba(200,190,240,0.2)' }}>
                       <span style={{ fontSize: 12, color: '#a89cc8' }}>{lbl}</span>
                       <span style={{ fontSize: 14, fontWeight: 700, color: String(col) }}>{String(val)}</span>
@@ -555,9 +564,10 @@ export default function TaxpayerDetailPage() {
 
           <div className="glass-card" style={{ padding: '16px 18px' }}>
             <h4 style={{ margin: '0 0 12px', fontSize: 13, fontWeight: 700, color: '#2d2545' }}>สรุปยอดภาษี</h4>
-            {[['ยอดประเมินรวม', `฿${formatCurrency((assess?.landAmount ?? 0) + (assess?.signAmount ?? 0))}`, '#2d2545'],
-              ['รับชำระแล้ว', `฿${formatCurrency(landPaid + signPaid)}`, '#1a8f5a'],
-              ['คงเหลือ', `฿${formatCurrency(landRem + signRem)}`, landRem + signRem > 0 ? '#c0392b' : '#1a8f5a']
+            {[['ยอดประเมินปีปัจจุบัน', `฿${formatCurrency((assess?.landAmount ?? 0) + (assess?.signAmount ?? 0))}`, '#2d2545'],
+              ['รับชำระของปีปัจจุบัน', `฿${formatCurrency(landPaid + signPaid)}`, '#1a8f5a'],
+              ['หนี้ค้างจากปีก่อน', `฿${formatCurrency(historicalOutstanding.reduce((sum, item) => sum + item.landRemaining + item.signRemaining, 0))}`, '#9a6800'],
+              ['ยอดค้างชำระสะสม', `฿${formatCurrency(accumulatedRemaining)}`, accumulatedRemaining > 0 ? '#c0392b' : '#1a8f5a']
             ].map(([l, v, c]) => (
               <div key={String(l)} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(200,190,240,0.2)', fontSize: 13 }}>
                 <span style={{ color: '#a89cc8' }}>{l}</span>
