@@ -22,25 +22,32 @@ let signedInUser: User | null = null
 localStorage.removeItem('tax_access_token')
 localStorage.removeItem('tax_current_user')
 
+const RETRYABLE_STATUS = new Set([500, 502, 503, 504])
+const wait = (milliseconds: number) => new Promise(resolve => window.setTimeout(resolve, milliseconds))
+
 export async function login(
   username: string,
   password: string
 ): Promise<User> {
-  let response: Response
-  try {
-    response = await fetch(`${API_URL}/login`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        username,
-        password,
-      }),
-    })
-  } catch {
-    throw new Error('ไม่สามารถเชื่อมต่อระบบเข้าสู่ระบบได้ กรุณาตรวจสอบ Backend และ VITE_API_URL')
+  let response: Response | null = null
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      response = await fetch(`${API_URL}/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+        cache: 'no-store',
+      })
+      if (!RETRYABLE_STATUS.has(response.status) || attempt === 2) break
+    } catch {
+      if (attempt === 2) {
+        throw new Error('ไม่สามารถเชื่อมต่อระบบเข้าสู่ระบบได้ กรุณารอสักครู่แล้วลองใหม่')
+      }
+    }
+    await wait(700 * (attempt + 1))
   }
+
+  if (!response) throw new Error('ไม่สามารถเชื่อมต่อระบบเข้าสู่ระบบได้ กรุณารอสักครู่แล้วลองใหม่')
 
   if (!response.ok) {
     let serverDetail = ''
@@ -102,7 +109,30 @@ export function installAuthenticatedFetch() {
     if (token && url.includes('/api/') && !publicRequest) {
       headers.set('Authorization', `Bearer ${token}`)
     }
-    const response = await originalFetch(input, { ...init, headers })
+    const method = (init.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase()
+    const isReadRequest = method === 'GET' || method === 'HEAD'
+    const requestInit: RequestInit = {
+      ...init,
+      headers,
+      ...(isReadRequest ? { cache: 'no-store' as RequestCache } : {}),
+    }
+    let response: Response | null = null
+    let lastNetworkError: unknown = null
+    const attempts = isReadRequest && url.includes('/api/') ? 3 : 1
+
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      try {
+        response = await originalFetch(input, requestInit)
+        if (!RETRYABLE_STATUS.has(response.status) || attempt === attempts - 1) break
+        await response.body?.cancel().catch(() => undefined)
+      } catch (error) {
+        lastNetworkError = error
+        if (attempt === attempts - 1) throw error
+      }
+      await wait(700 * (attempt + 1))
+    }
+
+    if (!response) throw lastNetworkError ?? new Error('ไม่สามารถเชื่อมต่อ Backend ได้')
     if (response.status === 401 && !publicRequest) {
       clearAuthSession()
       window.location.hash = '#/login'
