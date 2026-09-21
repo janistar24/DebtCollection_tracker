@@ -115,6 +115,18 @@ export default function TaxpayerListPage() {
     return () => document.removeEventListener('mousedown', handleOutsideClick)
   }, [])
 
+  useEffect(() => {
+    const handleOpenYearRequest = (event: Event) => {
+      const requestedYear = (event as CustomEvent<{ year?: number }>).detail?.year
+      if (requestedYear !== CURRENT_YEAR + 1) return
+      setOpenYearError('')
+      setShowOpenYearModal(true)
+    }
+
+    window.addEventListener('request-open-tax-year', handleOpenYearRequest)
+    return () => window.removeEventListener('request-open-tax-year', handleOpenYearRequest)
+  }, [])
+
   const filtered = useMemo(() => {
     return taxpayers.filter(tp => {
       if (!isDirector && tp.group !== currentUser?.group) return false
@@ -779,13 +791,9 @@ const handleInlineAdd = async () => {
               ? `สร้างข้อมูลตั้งต้นจากปี ${sourceYear} จำนวน ${sourceTaxpayers.length} ราย โดยไม่กระทบข้อมูลปีเดิม`
               : `ไม่พบข้อมูลปี ${sourceYear} สำหรับใช้เป็นข้อมูลตั้งต้น`}
           </div>
-          {canWrite ? <button
-            className="btn-primary"
-            disabled={sourceTaxpayers.length === 0}
-            onClick={() => { setOpenYearError(''); setShowOpenYearModal(true) }}
-          >
-            เปิดรอบปี {selectedYear}
-          </button> : <div style={{ fontSize: 12, color: '#8a5a00' }}>บัญชีผู้บริหารสามารถตรวจสอบข้อมูลได้เท่านั้น</div>}
+          {canWrite
+            ? <div style={{ fontSize: 12, color: '#81759f' }}>เลือก “เปิดรอบปี” จากรายการปีภาษีด้านบน</div>
+            : <div style={{ fontSize: 12, color: '#8a5a00' }}>บัญชีผู้บริหารสามารถตรวจสอบข้อมูลได้เท่านั้น</div>}
         </div>
 
         {canWrite && showOpenYearModal && (

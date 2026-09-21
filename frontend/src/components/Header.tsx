@@ -51,6 +51,13 @@ export default function Header({ pathname }: Props) {
     setSelectedYear(year)
   }
 
+  const handleOpenYear = (year: number) => {
+    setSelectedYear(year)
+    window.dispatchEvent(new CustomEvent('request-open-tax-year', {
+      detail: { year },
+    }))
+  }
+
   return (
     <>
     <header className="glass-header no-print" style={{
@@ -63,7 +70,8 @@ export default function Header({ pathname }: Props) {
         {showYear && (
           <YearSelector value={selectedYear} onChange={handleYearChange}
             years={selectableYears.length > 0 ? selectableYears : [CURRENT_YEAR]}
-            openedYears={openedYears} />
+            openedYears={openedYears}
+            onOpenYear={pathname.startsWith('/taxpayers') ? handleOpenYear : undefined} />
         )}
       </div>
       {currentUser && (

@@ -4,6 +4,7 @@ import { CURRENT_YEAR } from '../data/taxData'
 interface Props {
   value: number
   onChange: (year: number) => void
+  onOpenYear?: (year: number) => void
   years?: number[]
   openedYears?: number[]
 }
@@ -11,6 +12,7 @@ interface Props {
 export default function YearSelector({
   value,
   onChange,
+  onOpenYear,
   years,
   openedYears,
 }: Props) {
@@ -71,6 +73,11 @@ export default function YearSelector({
   }, [])
 
   const selectYear = (year: number) => {
+    if (!opened.has(year) && year === CURRENT_YEAR + 1 && onOpenYear) {
+      onOpenYear(year)
+      setOpen(false)
+      return
+    }
     onChange(year)
     setOpen(false)
   }
@@ -158,6 +165,8 @@ export default function YearSelector({
         >
           {options.map((year) => {
             const selected = year === value
+            const canOpenYear = !opened.has(year) && year === CURRENT_YEAR + 1
+            const isTooEarly = !opened.has(year) && year > CURRENT_YEAR + 1
 
             return (
               <button
@@ -180,6 +189,10 @@ export default function YearSelector({
                   fontWeight: selected ? 700 : 500,
                   textAlign: 'left',
                   whiteSpace: 'nowrap',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 10,
                 }}
                 onMouseEnter={(event) => {
                   if (!selected) {
@@ -192,8 +205,19 @@ export default function YearSelector({
                   }
                 }}
               >
-                {selected ? '✓ ' : ''}
-                {getYearLabel(year)}
+                <span>{selected ? '✓ ' : ''}{getYearLabel(year)}</span>
+                {canOpenYear && (
+                  <span style={{
+                    flexShrink: 0, padding: '3px 8px', borderRadius: 999,
+                    background: selected ? 'rgba(255,255,255,.2)' : '#efe8fc',
+                    color: selected ? '#fff' : '#6f50b3', fontSize: 11, fontWeight: 700,
+                  }}>เปิดรอบปี</span>
+                )}
+                {isTooEarly && (
+                  <span style={{
+                    flexShrink: 0, color: selected ? '#fff' : '#a89cc8', fontSize: 10,
+                  }}>ยังไม่ถึงกำหนด</span>
+                )}
               </button>
             )
           })}
