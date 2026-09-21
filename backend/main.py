@@ -8,6 +8,7 @@ import subprocess
 import uuid
 from collections import defaultdict, deque
 from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from threading import Lock
 from time import monotonic
 from typing import Literal
@@ -64,6 +65,12 @@ taxpayer_year_records_service = Taxpayer_year_records()
 payment_allocations_service = Payment_allocations()
 
 password_hash = PasswordHash.recommended()
+
+
+def current_tax_year() -> int:
+    """ปีภาษี พ.ศ. รอบ 1 ตุลาคมถึง 30 กันยายน ตามเวลา Asia/Bangkok"""
+    today_bangkok = datetime.now(ZoneInfo("Asia/Bangkok")).date()
+    return today_bangkok.year + 543 + (1 if today_bangkok.month >= 10 else 0)
 
 app.add_middleware(
     CORSMiddleware,
@@ -1238,9 +1245,9 @@ class HistoricalDebtCreate(BaseModel):
 def create_historical_debt(taxpayer_id: int, payload: HistoricalDebtCreate, request: Request):
     """บันทึกยอดหนี้ยกมาโดยไม่ต้องมีทะเบียนประจำปีฉบับเต็ม"""
     _require_group(request, _taxpayer_group(taxpayer_id))
-    current_tax_year = date.today().year + 543
-    if payload.tax_year < 2400 or payload.tax_year >= current_tax_year:
-        raise HTTPException(status_code=400, detail=f"ปีภาษีต้องเป็นปีก่อน {current_tax_year}")
+    active_tax_year = current_tax_year()
+    if payload.tax_year < 2400 or payload.tax_year >= active_tax_year:
+        raise HTTPException(status_code=400, detail=f"ปีภาษีต้องเป็นปีก่อน {active_tax_year}")
     if payload.land_amount < 0 or payload.sign_amount < 0:
         raise HTTPException(status_code=400, detail="ยอดหนี้ต้องไม่ติดลบ")
     if payload.land_amount <= 0 and payload.sign_amount <= 0:

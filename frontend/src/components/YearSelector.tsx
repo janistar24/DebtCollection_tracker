@@ -37,7 +37,9 @@ export default function YearSelector({
 
   const getYearLabel = (year: number) => {
     if (year === CURRENT_YEAR) {
-      return `${year} — ปีปัจจุบัน`
+      return opened.has(year)
+        ? `${year} — ปีภาษีปัจจุบัน`
+        : `${year} — ปีภาษีปัจจุบัน (ยังไม่เปิดรอบ)`
     }
 
     if (!opened.has(year)) {
@@ -73,7 +75,7 @@ export default function YearSelector({
   }, [])
 
   const selectYear = (year: number) => {
-    if (!opened.has(year) && year === CURRENT_YEAR + 1 && onOpenYear) {
+    if (!opened.has(year) && year >= CURRENT_YEAR && year <= CURRENT_YEAR + 1 && onOpenYear) {
       onOpenYear(year)
       setOpen(false)
       return
@@ -165,7 +167,7 @@ export default function YearSelector({
         >
           {options.map((year) => {
             const selected = year === value
-            const canOpenYear = !opened.has(year) && year === CURRENT_YEAR + 1
+            const canOpenYear = !opened.has(year) && year >= CURRENT_YEAR && year <= CURRENT_YEAR + 1
             const isTooEarly = !opened.has(year) && year > CURRENT_YEAR + 1
 
             return (

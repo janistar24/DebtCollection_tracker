@@ -118,7 +118,7 @@ export default function TaxpayerListPage() {
   useEffect(() => {
     const handleOpenYearRequest = (event: Event) => {
       const requestedYear = (event as CustomEvent<{ year?: number }>).detail?.year
-      if (requestedYear !== CURRENT_YEAR + 1) return
+      if (requestedYear == null || requestedYear < CURRENT_YEAR || requestedYear > CURRENT_YEAR + 1) return
       setOpenYearError('')
       setShowOpenYearModal(true)
     }

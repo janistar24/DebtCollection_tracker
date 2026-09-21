@@ -1,7 +1,15 @@
 import type { FollowUp, Taxpayer } from '../types'
 
-// ฟังก์ชันคำนวณจากข้อมูลจริงที่โหลดจาก API
-export const CURRENT_YEAR = new Date().getFullYear() + 543
+// ปีภาษีของหน่วยงานเริ่มวันที่ 1 ตุลาคม และสิ้นสุดวันที่ 30 กันยายน
+// เช่น 1 ต.ค. 2569 ถึง 30 ก.ย. 2570 ถือเป็นปีภาษี 2570
+export const getCurrentTaxYear = (date = new Date()) => {
+  const buddhistCalendarYear = date.getFullYear() + 543
+  return date.getMonth() >= 9
+    ? buddhistCalendarYear + 1
+    : buddhistCalendarYear
+}
+
+export const CURRENT_YEAR = getCurrentTaxYear()
 
 export const getTaxpayerName = (tp: Taxpayer) => tp.type === 'company'
   ? (tp.companyName ?? '') : `${tp.title ?? ''}${tp.firstName} ${tp.lastName}`.trim()
