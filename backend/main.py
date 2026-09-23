@@ -606,8 +606,9 @@ def create_admin_user(payload: AdminUserCreate, http_request: Request):
             employee_code = _internal_employee_code()
             cursor.execute(
                 """SELECT user_id FROM public.users
-                   WHERE username=%s OR (%s IS NOT NULL AND LOWER(email)=%s)""",
-                (username, email, email),
+                   WHERE username=%s
+                      OR (email IS NOT NULL AND LOWER(email)=LOWER(%s::text))""",
+                (username, email),
             )
             if cursor.fetchone():
                 raise HTTPException(status_code=409, detail="ชื่อผู้ใช้งานหรืออีเมลถูกใช้งานแล้ว")
@@ -652,9 +653,10 @@ def update_admin_user(user_id: int, payload: AdminUserUpdate, http_request: Requ
                 raise HTTPException(status_code=404, detail="ไม่พบผู้ใช้งาน")
             cursor.execute(
                 """SELECT user_id FROM public.users
-                   WHERE (username=%s OR (%s IS NOT NULL AND LOWER(email)=%s))
+                   WHERE (username=%s
+                      OR (email IS NOT NULL AND LOWER(email)=LOWER(%s::text)))
                      AND user_id<>%s""",
-                (username, email, email, user_id),
+                (username, email, user_id),
             )
             if cursor.fetchone():
                 raise HTTPException(status_code=409, detail="ชื่อผู้ใช้งานหรืออีเมลถูกใช้งานแล้ว")
