@@ -74,7 +74,11 @@ async function userMutation(url: string, method: string, data?: unknown) {
   }
   const result = await readApiJson(response)
   if (!response.ok || !result.success) {
-    const message = typeof result.detail === 'string' ? result.detail : result.detail?.message
+    const message = typeof result.detail === 'string'
+      ? result.detail
+      : Array.isArray(result.detail)
+        ? result.detail.map((item: { msg?: string }) => item.msg).filter(Boolean).join(', ')
+        : result.detail?.message
     const requestId = result.request_id ? ` (Request ID: ${result.request_id})` : ''
     throw new Error(`${message ?? `ดำเนินการไม่สำเร็จ (HTTP ${response.status})`}${requestId}`)
   }

@@ -41,10 +41,21 @@ export default function AdminUsersPage() {
   }
 
   const nameParts = form.name.trim().split(/\s+/).filter(Boolean)
+  const usernameValid = /^[A-Za-z0-9._-]{3,64}$/.test(form.username.trim())
+  const emailValid = !form.email.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())
+  const occupiedOfficer = !editUser && form.role === 'officer'
+    ? users.find(user => user.role === 'officer' && user.active && user.group === form.group)
+    : undefined
   const formDisabledReason = nameParts.length < 2
     ? 'กรุณาระบุชื่อและนามสกุลให้ครบถ้วน'
     : (editUser || createMode === 'password') && !form.username.trim()
       ? 'กรุณาระบุชื่อผู้ใช้งาน'
+      : (editUser || createMode === 'password') && !usernameValid
+        ? 'ชื่อผู้ใช้งานต้องเป็นอักษรอังกฤษ ตัวเลข จุด ขีดกลาง หรือขีดล่าง 3–64 ตัว'
+        : !emailValid
+          ? 'รูปแบบอีเมลไม่ถูกต้อง'
+          : occupiedOfficer
+            ? `กลุ่ม ${form.group} มีเจ้าหน้าที่ผู้รับผิดชอบที่ใช้งานอยู่แล้ว (${occupiedOfficer.name}) กรุณาปิดบัญชีเดิมหรือเลือกกลุ่มอื่น`
       : !editUser && createMode === 'password' && form.password.length < 12
         ? `รหัสผ่านชั่วคราวต้องมีอย่างน้อย 12 ตัวอักษร (ขาดอีก ${12 - form.password.length} ตัว)`
         : !editUser && createMode === 'email' && !form.email.trim()
