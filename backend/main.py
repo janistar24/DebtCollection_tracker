@@ -95,6 +95,7 @@ def ensure_user_invitation_schema() -> None:
     for migration_name in (
         "005_add_user_email_invitations.sql",
         "006_add_taxpayer_title.sql",
+        "007_system_announcements.sql",
     ):
         migration_path = os.path.join(os.path.dirname(__file__), "migrations", migration_name)
         with open(migration_path, "r", encoding="utf-8") as migration_file:
@@ -319,7 +320,13 @@ def health_check():
         row, _ = db.fetch_one("SELECT 1 AS database_ready")
         if row is None or row[0] != 1:
             raise RuntimeError("database readiness check returned an invalid result")
-        return {"status": "ok", "database": "connected"}
+        release_id = (
+            os.getenv("RAILWAY_DEPLOYMENT_ID")
+            or os.getenv("RAILWAY_GIT_COMMIT_SHA")
+            or os.getenv("APP_RELEASE_ID")
+            or "local-development"
+        )
+        return {"status": "ok", "database": "connected", "release_id": release_id}
     except Exception:
         logger.exception("Database readiness check failed")
         return JSONResponse(
@@ -406,6 +413,17 @@ class AdminUserUpdate(BaseModel):
 
 class AdminPasswordReset(BaseModel):
     password: str
+
+
+class ChangeOwnPassword(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class AnnouncementCreate(BaseModel):
+    title: str
+    content: str
+    starts_at: datetime
 
 
 class AdminUserInvitation(BaseModel):
@@ -745,6 +763,31 @@ def reset_admin_user_password(user_id: int, request: AdminPasswordReset, http_re
     except Exception as error:
         raise HTTPException(status_code=500, detail={"message": "รีเซ็ตรหัสผ่านไม่สำเร็จ", "error": str(error)})
 
+
+@app.put("/api/account/password")
+def change_own_password(request: ChangeOwnPassword, http_request: Request):
+    if len(request.new_password) < 12:
+        raise HTTPException(status_code=400, detail="รหัสผ่านใหม่ต้องมีอย่างน้อย 12 ตัวอักษร")
+    user_id = _actor_id(http_request)
+    try:
+        with db.transaction() as cursor:
+            cursor.execute("SELECT password_hash FROM public.users WHERE user_id=%s FOR UPDATE", (user_id,))
+            record = cursor.fetchone()
+            if record is None:
+                raise HTTPException(status_code=404, detail="ไม่พบบัญชีผู้ใช้งาน")
+            if not password_hash.verify(request.current_password, record[0]):
+                raise HTTPException(status_code=400, detail="รหัสผ่านปัจจุบันไม่ถูกต้อง")
+            cursor.execute(
+                "UPDATE public.users SET password_hash=%s,updated_at=CURRENT_TIMESTAMP WHERE user_id=%s",
+                (password_hash.hash(request.new_password), user_id),
+            )
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Own password change failed")
+        raise HTTPException(status_code=500, detail="ไม่สามารถเปลี่ยนรหัสผ่านได้")
+
 @app.delete("/api/users/{user_id}")
 def delete_admin_user(user_id: int, http_request: Request):
     _require_admin_account_management(http_request)
@@ -766,6 +809,69 @@ def delete_admin_user(user_id: int, http_request: Request):
         raise
     except Exception as error:
         raise HTTPException(status_code=500, detail={"message": "ลบบัญชีผู้ใช้งานไม่สำเร็จ", "error": str(error)})
+
+
+@app.get("/api/announcements")
+def get_announcements(request: Request):
+    try:
+        rows, columns = db.fetch(
+            """SELECT announcement_id,title,content,starts_at,is_active,created_by,created_at
+               FROM public.system_announcements
+               WHERE is_active=TRUE
+               ORDER BY starts_at DESC,announcement_id DESC"""
+        )
+        return {
+            "success": True,
+            "server_time": datetime.now(timezone.utc),
+            "data": [dict(zip(columns, row)) for row in rows],
+        }
+    except Exception:
+        logger.exception("Announcement loading failed")
+        raise HTTPException(status_code=500, detail="ไม่สามารถโหลดประกาศได้")
+
+
+@app.post("/api/announcements")
+def create_announcement(payload: AnnouncementCreate, request: Request):
+    _require_admin_account_management(request)
+    title = payload.title.strip()
+    content = payload.content.strip()
+    starts_at = payload.starts_at
+    if not title or not content:
+        raise HTTPException(status_code=400, detail="กรุณากรอกหัวข้อและรายละเอียดประกาศ")
+    if starts_at.tzinfo is None:
+        starts_at = starts_at.replace(tzinfo=ZoneInfo("Asia/Bangkok"))
+    if starts_at.astimezone(timezone.utc) < datetime.now(timezone.utc) + timedelta(seconds=30):
+        raise HTTPException(status_code=400, detail="เวลาเริ่มอัปเดตต้องล่วงหน้าอย่างน้อย 30 วินาที")
+    try:
+        row, columns = db.execute_returning(
+            """INSERT INTO public.system_announcements(title,content,starts_at,created_by)
+               VALUES (%s,%s,%s,%s)
+               RETURNING announcement_id,title,content,starts_at,is_active,created_by,created_at""",
+            (title, content, starts_at, _actor_id(request)),
+        )
+        return {"success": True, "data": dict(zip(columns, row))}
+    except Exception:
+        logger.exception("Announcement creation failed")
+        raise HTTPException(status_code=500, detail="ไม่สามารถสร้างประกาศได้")
+
+
+@app.delete("/api/announcements/{announcement_id}")
+def close_announcement(announcement_id: int, request: Request):
+    _require_admin_account_management(request)
+    try:
+        row, _ = db.execute_returning(
+            """UPDATE public.system_announcements SET is_active=FALSE
+               WHERE announcement_id=%s AND is_active=TRUE RETURNING announcement_id""",
+            (announcement_id,),
+        )
+        if row is None:
+            raise HTTPException(status_code=404, detail="ไม่พบประกาศ")
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Announcement close failed")
+        raise HTTPException(status_code=500, detail="ไม่สามารถปิดประกาศได้")
 
 @app.get("/api/taxpayers")
 def get_taxpayers(request: Request):

@@ -20,6 +20,7 @@ import {
 } from '../api/taxpayer_year_records'
 import { bulkSaveTaxpayerYearRecords } from '../api/taxpayer_year_records'
 import type { Taxpayer } from '../types'
+import { SYSTEM_UPDATE_EVENT, type SystemUpdateEventDetail } from '../systemUpdate'
 
 const GROUPS = ['ก-น', 'บ-ล', 'ส-ศ', 'ว-ฮ และบริษัท']
 // Safari needs extra room for Thai text and notes that may wrap to a second line.
@@ -113,18 +114,6 @@ export default function TaxpayerListPage() {
 
     document.addEventListener('mousedown', handleOutsideClick)
     return () => document.removeEventListener('mousedown', handleOutsideClick)
-  }, [])
-
-  useEffect(() => {
-    const handleOpenYearRequest = (event: Event) => {
-      const requestedYear = (event as CustomEvent<{ year?: number }>).detail?.year
-      if (requestedYear == null || requestedYear < CURRENT_YEAR || requestedYear > CURRENT_YEAR + 1) return
-      setOpenYearError('')
-      setShowOpenYearModal(true)
-    }
-
-    window.addEventListener('request-open-tax-year', handleOpenYearRequest)
-    return () => window.removeEventListener('request-open-tax-year', handleOpenYearRequest)
   }, [])
 
   const filtered = useMemo(() => {
@@ -324,9 +313,11 @@ const handleSaveAll = async () => {
     }
     setPendingEdits({}); setPendingNotes({}); setPendingAdds({}); setPendingRemoves({})
     setSaveConfirm(false); setEditMode(false)
+    return true
   } catch (error) {
     console.error('Save annual taxpayer error:', error)
     alert(error instanceof Error ? error.message : 'บันทึกข้อมูลไม่สำเร็จ')
+    return false
   } finally { setSaving(false) }
 }
 
@@ -766,6 +757,16 @@ const handleInlineAdd = async () => {
 
   const hasPending = pendingCount > 0
 
+  useEffect(() => {
+    const saveBeforeUpdate = (event: Event) => {
+      if (!hasPending) return
+      const detail = (event as CustomEvent<SystemUpdateEventDetail>).detail
+      detail?.tasks.push(handleSaveAll())
+    }
+    window.addEventListener(SYSTEM_UPDATE_EVENT, saveBeforeUpdate)
+    return () => window.removeEventListener(SYSTEM_UPDATE_EVENT, saveBeforeUpdate)
+  }, [hasPending, pendingAdds, pendingEdits, pendingNotes, pendingRemoves, selectedYear, taxpayers])
+
   if (!hasSelectedYearData) {
     return (
       <div className="annual-taxpayer-page app-fluid-page">
@@ -786,14 +787,18 @@ const handleInlineAdd = async () => {
           <div style={{ fontSize: 18, fontWeight: 700, color: '#2d2545', marginBottom: 6 }}>
             ยังไม่มีข้อมูลปีภาษี {selectedYear}
           </div>
-          <div style={{ fontSize: 13, color: '#a89cc8', marginBottom: 20 }}>
-            {sourceTaxpayers.length > 0
-              ? `สร้างข้อมูลตั้งต้นจากปี ${sourceYear} จำนวน ${sourceTaxpayers.length} ราย โดยไม่กระทบข้อมูลปีเดิม`
-              : `ไม่พบข้อมูลปี ${sourceYear} สำหรับใช้เป็นข้อมูลตั้งต้น`}
-          </div>
-          {canWrite
-            ? <div style={{ fontSize: 12, color: '#81759f' }}>เลือก “เปิดรอบปี” จากรายการปีภาษีด้านบน</div>
-            : <div style={{ fontSize: 12, color: '#8a5a00' }}>บัญชีผู้บริหารสามารถตรวจสอบข้อมูลได้เท่านั้น</div>}
+          {canWrite && selectedYear >= CURRENT_YEAR && selectedYear <= CURRENT_YEAR + 1
+            ? <button
+                type="button"
+                className="btn-primary"
+                disabled={sourceTaxpayers.length === 0}
+                onClick={() => { setOpenYearError(''); setShowOpenYearModal(true) }}
+              >
+                เปิดรอบปีภาษี {selectedYear}
+              </button>
+            : !canWrite
+              ? <div style={{ fontSize: 12, color: '#8a5a00' }}>บัญชีผู้บริหารสามารถตรวจสอบข้อมูลได้เท่านั้น</div>
+              : null}
         </div>
 
         {canWrite && showOpenYearModal && (
@@ -1087,7 +1092,7 @@ const handleInlineAdd = async () => {
                     <td style={TD} colSpan={editMode ? 16 : 15}>
                       <div style={{ fontSize: 11, color: '#7c5cbf', marginBottom: 3, fontWeight: 600 }}>+ เพิ่มรายการ</div>
                       <div style={{ fontSize: 10, color: '#a89cc8', marginBottom: 7 }}>
-                        เลือกผู้เสียภาษีแล้วเพิ่มเข้าตาราง ระบบจะใช้ยอดภาษีล่าสุดเป็นค่าเริ่มต้น
+                        เลือกผู้เสียภาษีเพิ่มเข้าตาราง ระบบจะใช้ยอดภาษีล่าสุดเป็นค่าเริ่มต้น
                       </div>
 
                       <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap' }}>

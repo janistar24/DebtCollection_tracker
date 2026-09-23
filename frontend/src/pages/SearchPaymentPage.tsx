@@ -562,7 +562,7 @@ export default function SearchPaymentPage() {
             <label style={LBL}>ยอดเงินที่ได้รับ (บาท)</label>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <input ref={inputRef} className="input-field" type="number" step="0.01"
-                placeholder="เช่น 101.00" value={amtInput}
+                placeholder="เช่น 101.10" value={amtInput}
                 onChange={e => setAmtInput(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && void runSearch()}
                 style={{ width: 200, fontSize: 18, fontWeight: 600, padding: '11px 16px' }} />

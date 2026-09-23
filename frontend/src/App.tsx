@@ -1,8 +1,10 @@
-import { Component, lazy, Suspense, useState, type ErrorInfo, type ReactNode } from 'react'
+import { Component, lazy, Suspense, useEffect, useRef, useState, type ErrorInfo, type ReactNode } from 'react'
 import { HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { AppProvider, useApp } from './context/AppContext'
 import Sidebar from './components/Sidebar'
 import Header from './components/Header'
+import { getAnnouncements, getReleaseId, type SystemAnnouncement } from './api/announcements'
+import { saveOpenEditorsBeforeSystemUpdate } from './systemUpdate'
 
 const LoginPage = lazy(() => import('./pages/LoginPage'))
 const AcceptInvitePage = lazy(() => import('./pages/AcceptInvitePage'))
@@ -26,14 +28,67 @@ class PageErrorBoundary extends Component<{ children: ReactNode }, { error: Erro
 }
 
 function ProtectedLayout() {
-  const { currentUser } = useApp()
+  const { currentUser, logout } = useApp()
   const location = useLocation()
   const [collapsed, setCollapsed] = useState(false)
+  const [maintenance, setMaintenance] = useState<SystemAnnouncement | null>(null)
+  const [updateMessage, setUpdateMessage] = useState('')
+  const baselineIds = useRef<Set<number> | null>(null)
+  const currentRelease = useRef('')
+  const checkingUpdate = useRef(false)
+
+  useEffect(() => {
+    if (!currentUser) return
+    void getReleaseId().then(id => { currentRelease.current = id }).catch(() => undefined)
+    const check = async () => {
+      if (checkingUpdate.current || maintenance) return
+      checkingUpdate.current = true
+      try {
+        const snapshot = await getAnnouncements()
+        const now = new Date(snapshot.serverTime).getTime()
+        const due = snapshot.announcements.filter(item => new Date(item.starts_at).getTime() <= now)
+        if (baselineIds.current === null) { baselineIds.current = new Set(due.map(item => item.announcement_id)); return }
+        const target = due.find(item => !baselineIds.current?.has(item.announcement_id) && !sessionStorage.getItem(`debt-update-refreshed:${item.announcement_id}`))
+        if (!target) return
+        setUpdateMessage('ถึงกำหนดปรับปรุงระบบ กำลังบันทึกงานที่เปิดอยู่โดยอัตโนมัติ...')
+        const saved = await saveOpenEditorsBeforeSystemUpdate()
+        if (!saved) {
+          setUpdateMessage('ยังบันทึกงานไม่สำเร็จ ระบบจะลองใหม่อีกครั้ง โดยยังไม่ปิดหน้าที่กำลังทำงาน')
+          return
+        }
+        if (!currentRelease.current) currentRelease.current = await getReleaseId()
+        setMaintenance(target)
+      } catch (error) { console.error('System update check failed:', error) }
+      finally { checkingUpdate.current = false }
+    }
+    void check()
+    const timer = window.setInterval(check, 10_000)
+    return () => window.clearInterval(timer)
+  }, [currentUser, maintenance])
+
+  useEffect(() => {
+    if (!maintenance) return
+    const checkRelease = async () => {
+      try {
+        const nextRelease = await getReleaseId()
+        if (currentRelease.current && nextRelease && nextRelease !== currentRelease.current) {
+          sessionStorage.setItem(`debt-update-refreshed:${maintenance.announcement_id}`, '1')
+          logout()
+          window.location.reload()
+        }
+      } catch { /* ระหว่าง deploy backend อาจยังไม่พร้อม ให้คงหน้ารอและตรวจซ้ำ */ }
+    }
+    const timer = window.setInterval(checkRelease, 5_000)
+    return () => window.clearInterval(timer)
+  }, [maintenance, logout])
 
   if (!currentUser) return <Navigate to="/login" replace />
 
+  if (maintenance) return <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 24, background: 'radial-gradient(circle at top,#eee8ff,#f9f8ff 55%)' }}><div style={{ maxWidth: 570, width: '100%', textAlign: 'center', background: '#fff', border: '1px solid #e2d8f5', borderRadius: 24, padding: '44px 34px', boxShadow: '0 24px 60px rgba(72,49,120,.14)' }}><div style={{ fontSize: 52, marginBottom: 14 }}>🛠️</div><h1 style={{ margin: '0 0 10px', fontSize: 24, color: '#302746' }}>กำลังปรับปรุงระบบ</h1><p style={{ margin: '0 auto 8px', color: '#685c78', lineHeight: 1.7 }}>{maintenance.content}</p><p style={{ margin: '18px 0 0', color: '#8d7ca8', fontSize: 13 }}>ระบบบันทึกงานของคุณแล้ว และกำลังตรวจสอบเวอร์ชันใหม่โดยอัตโนมัติ<br />เมื่ออัปเดตเสร็จ ระบบจะพากลับไปหน้าเข้าสู่ระบบ</p><div style={{ width: 42, height: 42, margin: '24px auto 0', border: '4px solid #eadff8', borderTopColor: '#855dca', borderRadius: '50%', animation: 'spin 1s linear infinite' }} /></div></div>
+
   return (
     <div className="app-shell" style={{ display: 'flex', width: '100%', height: '100vh', overflow: 'hidden', background: 'radial-gradient(ellipse at 15% 10%, rgba(196,181,240,0.18) 0%, transparent 40%), radial-gradient(ellipse at 85% 85%, rgba(218,237,248,0.22) 0%, transparent 40%), #f8f7ff' }}>
+      {updateMessage && <div style={{ position: 'fixed', top: 72, right: 20, zIndex: 1000, maxWidth: 430, padding: '12px 16px', borderRadius: 12, background: '#4d3a70', color: '#fff', fontSize: 13, boxShadow: '0 10px 30px rgba(0,0,0,.2)' }}>{updateMessage}</div>}
       <Sidebar collapsed={collapsed} onToggle={() => setCollapsed(c => !c)} />
       <div className="app-main-column" style={{ flex: 1, height: '100vh', display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
         <Header pathname={location.pathname} />

@@ -267,13 +267,13 @@ const handleSubmit = async (
                 </div>
                 <div>
                   <label style={LBL}>ชื่อ *</label>
-                  <input className="input-field" placeholder="เช่น กรกน" value={firstName}
+                  <input className="input-field" placeholder="สมชาย" value={firstName}
                     onChange={e => { setFirstName(e.target.value); setErrors(prev => ({ ...prev, firstName: '', code: '' })) }} />
                   {err('firstName')}
                 </div>
                 <div>
                   <label style={LBL}>นามสกุล *</label>
-                  <input className="input-field" placeholder="เช่น สำลีสัน" value={lastName}
+                  <input className="input-field" placeholder="ภาษีดี" value={lastName}
                     onChange={e => { setLastName(e.target.value); setErrors(prev => ({ ...prev, lastName: '', code: '' })) }} />
                   {err('lastName')}
                 </div>

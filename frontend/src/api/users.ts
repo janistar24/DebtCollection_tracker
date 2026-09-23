@@ -98,6 +98,13 @@ export async function resetUserPassword(userId: number, password: string) {
   return userMutation(`${API_URL}/users/${userId}/password`, 'PUT', { password })
 }
 
+export async function changeOwnPassword(currentPassword: string, newPassword: string) {
+  return userMutation(`${API_URL}/account/password`, 'PUT', {
+    current_password: currentPassword,
+    new_password: newPassword,
+  })
+}
+
 export async function deleteUser(userId: number) {
   return userMutation(`${API_URL}/users/${userId}`, 'DELETE')
 }

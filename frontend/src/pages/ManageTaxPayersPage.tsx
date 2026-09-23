@@ -51,7 +51,7 @@ export default function ManageTaxpayersPage() {
         <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}><div style={{ width: 42, height: 42, borderRadius: 13, background: '#eee8fb', display: 'grid', placeItems: 'center', fontSize: 19 }}>{tp.type === 'company' ? '🏢' : '👤'}</div><div><div style={{ fontWeight: 700 }}>{nameOf(tp)}</div><div style={{ fontSize: 11, color: '#a89cc8' }}>{tp.ownerCode || 'หน่วยงาน / นิติบุคคล'} · กลุ่ม {tp.group}</div></div></div>
         <div style={{ marginTop: 13, color: '#6b5b95', fontSize: 12, lineHeight: 1.8 }}>☎ {tp.phone || '-'}<br/>⌂ {tp.address || '-'}</div>
         <div style={{ display: 'flex', gap: 6, marginTop: 14, paddingTop: 12, borderTop: '1px solid rgba(200,190,240,.25)' }}>
-          <button className="btn-secondary" style={{ flex: 1, fontSize: 11 }} onClick={() => navigate(`/taxpayers/manage/${tp.id}`)}>ตรวจสอบรายละเอียด</button>
+          <button className="btn-secondary" style={{ flex: '0 0 auto', minWidth: 112, paddingInline: 10, fontSize: 11, whiteSpace: 'nowrap' }} onClick={() => navigate(`/taxpayers/manage/${tp.id}`)}>ตรวจสอบรายละเอียด</button>
           {canWrite && <><button className="btn-ghost" style={{ fontSize: 11 }} onClick={() => navigate(`/taxpayers/manage/${tp.id}?edit=1`)}>แก้ไข</button>
           {canDeletePermanently && <button className="btn-ghost" style={{ fontSize: 11, color: '#c0392b' }} onClick={() => navigate(`/taxpayers/manage/${tp.id}?delete=1`)}>ลบข้อมูลถาวร</button>}</>}
         </div>

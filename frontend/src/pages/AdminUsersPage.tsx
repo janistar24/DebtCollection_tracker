@@ -21,6 +21,8 @@ export default function AdminUsersPage() {
   const [activeTarget, setActiveTarget] = useState<User | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<User | null>(null)
   const [newPassword, setNewPassword] = useState('')
+  const [temporaryPasswords, setTemporaryPasswords] = useState<Record<string, string>>({})
+  const [visiblePasswordId, setVisiblePasswordId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
@@ -29,6 +31,7 @@ export default function AdminUsersPage() {
     window.setTimeout(() => setNotice(null), 4200)
   }
   const openAdd = () => { setNotice(null); setEditUser(null); setForm(EMPTY); setCreateMode('password'); setShowForm(true) }
+  const openInvite = () => { setNotice(null); setEditUser(null); setForm(EMPTY); setCreateMode('email'); setShowForm(true) }
   const openEdit = (u: User) => {
     setNotice(null)
     setCreateMode('password')
@@ -68,6 +71,7 @@ export default function AdminUsersPage() {
       } else {
         const created = await createUser({ ...payload, password: form.password })
         addUser({ id: created.id, code: created.code, name: `${firstName} ${lastName}`, username: payload.username, email: form.email.trim() || undefined, role: form.role as User['role'], group: form.role === 'officer' ? form.group : undefined, active: form.active })
+        setTemporaryPasswords(current => ({ ...current, [created.id]: form.password }))
         notify('success', 'สร้างบัญชีผู้ใช้งานเรียบร้อยแล้ว')
       }
       setShowForm(false)
@@ -77,7 +81,14 @@ export default function AdminUsersPage() {
 
   const resetPassword = async () => {
     if (!resetTarget || newPassword.length < 12) return
-    try { setBusy(true); await resetUserPassword(Number(resetTarget.id), newPassword); setResetTarget(null); setNewPassword(''); notify('success', `รีเซ็ตรหัสผ่านของ ${resetTarget.username} เรียบร้อยแล้ว`) }
+    try {
+      setBusy(true)
+      await resetUserPassword(Number(resetTarget.id), newPassword)
+      setTemporaryPasswords(current => ({ ...current, [resetTarget.id]: newPassword }))
+      setResetTarget(null)
+      setNewPassword('')
+      notify('success', `รีเซ็ตรหัสผ่านของ ${resetTarget.username} เรียบร้อยแล้ว`)
+    }
     catch (e) { notify('error', e instanceof Error ? e.message : 'ไม่สามารถรีเซ็ตรหัสผ่านได้') }
     finally { setBusy(false) }
   }
@@ -107,38 +118,59 @@ export default function AdminUsersPage() {
   return <div className="app-fluid-page" style={{ paddingBottom: 36 }}>
     <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 18, marginBottom: 20, flexWrap: 'wrap' }}>
       <div><h2 style={{ margin: '0 0 4px', fontSize: 21 }}>จัดการผู้ใช้งาน</h2><p style={SUB}>สร้างบัญชี กำหนดสิทธิ์ และควบคุมกลุ่มข้อมูลที่ผู้ใช้งานรับผิดชอบ</p></div>
-      <div style={{ display: 'flex', gap: 9 }}><button type="button" className="btn-secondary" disabled={dataLoading} onClick={() => void refreshUsers()}>{dataLoading ? 'กำลังรีเฟรช...' : '↻ รีเฟรชรายชื่อ'}</button><button type="button" className="btn-primary" onClick={openAdd}>＋ เพิ่มผู้ใช้งาน</button></div>
+      <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap' }}>
+        <button type="button" className="btn-secondary" disabled={dataLoading} onClick={() => void refreshUsers()}>{dataLoading ? 'กำลังรีเฟรช...' : '↻ รีเฟรช'}</button>
+        <button type="button" className="btn-secondary" onClick={openInvite}>✉ สร้างคำเชิญ</button>
+        <button type="button" className="btn-primary" onClick={openAdd}>＋ เพิ่มผู้ใช้งาน</button>
+      </div>
     </div>
     {notice && <div role="alert" style={{ marginBottom: 14, padding: '11px 14px', borderRadius: 11, fontSize: 13.5, background: notice.type === 'success' ? '#ecf9f2' : '#fff1f0', border: `1px solid ${notice.type === 'success' ? '#b9e7ce' : '#f2c1bd'}`, color: notice.type === 'success' ? '#18794e' : '#b42318' }}>{notice.type === 'success' ? '✓' : '⚠'} {notice.text}</div>}
 
     <div className="glass-card" style={{ padding: 0, overflow: 'hidden' }}>
-      {!users.length ? <EmptyState icon="👥" title="ยังไม่มีบัญชีผู้ใช้งาน" /> : <div style={{ overflowX: 'auto' }}><table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13.5, minWidth: 930 }}>
-        <thead><tr style={{ background: 'rgba(240,236,251,.62)' }}>{['ชื่อผู้ใช้งาน', 'ชื่อ-นามสกุล', 'อีเมล', 'รหัสผ่าน', 'สิทธิ์การใช้งาน', 'กลุ่มที่รับผิดชอบ', 'สถานะ', 'ดำเนินการ'].map(h => <th key={h} style={TH}>{h}</th>)}</tr></thead>
+      {!users.length ? <EmptyState icon="👥" title="ยังไม่มีบัญชีผู้ใช้งาน" /> : <div style={{ overflowX: 'auto' }}><table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13.5, minWidth: 1020 }}>
+        <thead><tr style={{ background: 'rgba(240,236,251,.62)' }}>{['ชื่อผู้ใช้', 'ชื่อ', 'รหัสผ่าน', 'สิทธิ์การใช้งาน', 'กลุ่มที่รับผิดชอบ', 'สถานะ', 'ดำเนินการ', 'ลบบัญชี'].map(h => <th key={h} style={TH}>{h}</th>)}</tr></thead>
         <tbody>{users.map(u => {
           const self = u.id === currentUser?.id
           return <tr key={u.id} className="table-row-hover" style={{ borderBottom: '1px solid rgba(200,190,240,.2)' }}>
             <td style={{ ...TD, fontFamily: 'monospace', color: '#6d4fbb', fontWeight: 600 }}>{u.username || '—'}</td>
             <td style={{ ...TD, fontWeight: 600 }}>{u.name}</td>
-            <td style={{ ...TD, color: '#6b5b95' }}>{u.email || '—'}</td>
-            <td style={TD}><span style={{ fontFamily: 'monospace', letterSpacing: 2, color: '#7b728e' }}>••••••••</span></td>
+            <td style={TD}>
+              <span style={{ fontFamily: 'monospace', letterSpacing: visiblePasswordId === u.id ? 0 : 2, color: '#514760' }}>
+                {visiblePasswordId === u.id ? temporaryPasswords[u.id] : '••••••••'}
+              </span>
+              <button
+                type="button"
+                aria-label={temporaryPasswords[u.id] ? 'กดค้างเพื่อดูรหัสผ่านชั่วคราว' : 'รีเซ็ตรหัสผ่านก่อนจึงจะแสดงได้'}
+                title={temporaryPasswords[u.id] ? 'กดค้างเพื่อดูรหัสผ่านชั่วคราว' : 'เพื่อความปลอดภัย ระบบไม่สามารถแสดงรหัสเดิมได้ กรุณารีเซ็ตรหัสผ่าน'}
+                disabled={!temporaryPasswords[u.id]}
+                onPointerDown={() => temporaryPasswords[u.id] && setVisiblePasswordId(u.id)}
+                onPointerUp={() => setVisiblePasswordId(null)}
+                onPointerCancel={() => setVisiblePasswordId(null)}
+                onPointerLeave={() => setVisiblePasswordId(null)}
+                style={{ ...EYE, opacity: temporaryPasswords[u.id] ? 1 : .35, cursor: temporaryPasswords[u.id] ? 'pointer' : 'not-allowed' }}
+              >
+                <EyeIcon />
+              </button>
+            </td>
             <td style={TD}><StatusBadge status={u.role} size="sm" /></td>
             <td style={{ ...TD, color: '#6b5b95' }}>{u.role === 'officer' ? `กลุ่ม ${u.group ?? 'ยังไม่กำหนด'}` : 'ทุกกลุ่ม'}</td>
             <td style={TD}><StatusBadge status={u.pendingApproval ? 'pending_approval' : u.active ? 'active' : 'inactive'} size="sm" /></td>
-            <td style={TD}><div style={{ display: 'flex', gap: 3, whiteSpace: 'nowrap' }}>
+            <td style={TD}><div style={{ display: 'flex', gap: 5, whiteSpace: 'nowrap' }}>
               <button type="button" style={ACTION} onClick={() => openEdit(u)}>แก้ไข</button>
               <button type="button" style={ACTION} onClick={() => { setResetTarget(u); setNewPassword('') }}>รีเซ็ตรหัสผ่าน</button>
-              <button type="button" style={{ ...ACTION, color: u.active ? '#a55b16' : '#168653', fontWeight: u.pendingApproval ? 700 : 400 }} disabled={self} title={self ? 'ไม่สามารถปิดบัญชีที่กำลังใช้งานอยู่' : ''} onClick={() => setActiveTarget(u)}>{u.active ? 'ปิดการใช้งาน' : u.pendingApproval ? 'อนุมัติการใช้งาน' : 'เปิดใช้งาน'}</button>
-              <button type="button" style={{ ...ACTION, color: '#c0392b' }} disabled={self} title={self ? 'ไม่สามารถลบบัญชีที่กำลังใช้งานอยู่' : ''} onClick={() => setDeleteTarget(u)}>ลบบัญชี</button>
+            </div></td>
+            <td style={TD}><div style={{ display: 'flex', gap: 6, whiteSpace: 'nowrap' }}>
+              <button type="button" style={{ ...SMALL_BUTTON, color: u.active ? '#6a5631' : '#168653' }} disabled={self} title={self ? 'ไม่สามารถปิดบัญชีที่กำลังใช้งานอยู่' : ''} onClick={() => setActiveTarget(u)}>{u.active ? 'ปิดการใช้งาน' : u.pendingApproval ? 'อนุมัติการใช้งาน' : 'เปิดใช้งาน'}</button>
+              <button type="button" style={{ ...SMALL_BUTTON, color: '#fff', background: '#e83d45', borderColor: '#e83d45' }} disabled={self} title={self ? 'ไม่สามารถลบบัญชีที่กำลังใช้งานอยู่' : ''} onClick={() => setDeleteTarget(u)}>ลบบัญชี</button>
             </div></td>
           </tr>
         })}</tbody>
       </table></div>}
     </div>
 
-    {showForm && <Modal title={editUser ? 'แก้ไขข้อมูลผู้ใช้งาน' : 'เพิ่มผู้ใช้งาน'} onClose={() => !busy && setShowForm(false)} maxWidth="650px">
+    {showForm && <Modal title={editUser ? 'แก้ไขข้อมูลผู้ใช้งาน' : createMode === 'email' ? 'สร้างลิงก์คำเชิญ' : 'เพิ่มผู้ใช้งาน'} onClose={() => !busy && setShowForm(false)} maxWidth="650px">
       <p style={SUB}>กำหนดข้อมูลบัญชีและขอบเขตสิทธิ์ให้สอดคล้องกับหน้าที่รับผิดชอบ</p>
       {notice?.type === 'error' && <div role="alert" style={{ ...DANGER, marginTop: 14 }}>{notice.text}</div>}
-      {!editUser && <div style={{ display: 'flex', gap: 8, marginTop: 15 }}><button type="button" className={createMode === 'password' ? 'btn-primary' : 'btn-secondary'} onClick={() => { setCreateMode('password'); setNotice(null) }}>กำหนดรหัสผ่านให้</button><button type="button" className={createMode === 'email' ? 'btn-primary' : 'btn-secondary'} onClick={() => { setCreateMode('email'); setNotice(null) }}>สร้างลิงก์คำเชิญ</button></div>}
       <div style={{ display: 'grid', gap: 15, marginTop: 16 }}>
         <Field label="ชื่อ-นามสกุล *"><input className="input-field" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
         <div style={GRID}>{(editUser || createMode === 'password') && <Field label="ชื่อผู้ใช้งาน *"><input className="input-field" autoComplete="off" value={form.username} onChange={e => setForm({ ...form, username: e.target.value })} /></Field>}<Field label={`อีเมล ${!editUser && createMode === 'email' ? '*' : '(ไม่บังคับ)'}`}><input className="input-field" type="email" autoComplete="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></Field></div>
@@ -168,6 +200,7 @@ export default function AdminUsersPage() {
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) { return <label><span style={LABEL}>{label}</span>{children}</label> }
+function EyeIcon() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" stroke="currentColor" strokeWidth="1.8"/><circle cx="12" cy="12" r="2.7" stroke="currentColor" strokeWidth="1.8"/></svg> }
 function Actions({ busy, disabled, danger, confirm, cancel, run }: { busy: boolean; disabled?: boolean; danger?: boolean; confirm: string; cancel: () => void; run: () => void }) { return <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 24 }}><button type="button" className="btn-secondary" disabled={busy} onClick={cancel}>ยกเลิก</button><button type="button" className={danger ? 'btn-secondary' : 'btn-primary'} style={danger ? { color: '#fff', background: '#c0392b', borderColor: '#c0392b' } : undefined} disabled={busy || disabled} onClick={run}>{busy ? 'กำลังดำเนินการ...' : confirm}</button></div> }
 
 const SUB: CSSProperties = { margin: 0, fontSize: 13.5, color: '#8f82b1', lineHeight: 1.65 }
@@ -175,6 +208,8 @@ const LABEL: CSSProperties = { display: 'block', fontSize: 12.5, fontWeight: 600
 const TH: CSSProperties = { padding: '11px 13px', textAlign: 'left', fontWeight: 600, color: '#6b5b95', whiteSpace: 'nowrap', borderBottom: '1px solid rgba(200,190,240,.3)', fontSize: 12 }
 const TD: CSSProperties = { padding: '11px 13px', verticalAlign: 'middle' }
 const ACTION: CSSProperties = { border: 0, background: 'transparent', color: '#6d4fbb', padding: '6px 7px', borderRadius: 8, cursor: 'pointer', font: 'inherit', fontSize: 12 }
+const EYE: CSSProperties = { border: 0, background: 'transparent', color: '#6b5b95', padding: '3px 5px', marginLeft: 5, verticalAlign: 'middle', lineHeight: 0 }
+const SMALL_BUTTON: CSSProperties = { border: '1px solid #d9d5df', background: '#fff', padding: '5px 9px', borderRadius: 7, cursor: 'pointer', font: 'inherit', fontSize: 11.5, boxShadow: '0 1px 3px rgba(45,37,69,.08)' }
 const GRID: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 14 }
 const INFO: CSSProperties = { padding: '11px 13px', borderRadius: 11, background: '#f7f4ff', color: '#6b5b95', fontSize: 12.5 }
 const DANGER: CSSProperties = { padding: '14px 16px', borderRadius: 11, background: '#fff1f0', border: '1px solid #efbbb7', color: '#9f1d17', fontSize: 13.5, lineHeight: 1.7 }

@@ -37,7 +37,7 @@ const ROLE_LABEL: Record<string, string> = {
 interface Props { collapsed: boolean; onToggle: () => void }
 
 export default function Sidebar({ collapsed, onToggle }: Props) {
-  const { currentUser, logout } = useApp()
+  const { currentUser } = useApp()
   const location = useLocation()
   const menus = currentUser ? (ROLE_MENUS[currentUser.role] ?? []) : []
 
@@ -126,9 +126,6 @@ export default function Sidebar({ collapsed, onToggle }: Props) {
               <div style={{ fontSize: 11, color: '#a89cc8' }}>{ROLE_LABEL[currentUser.role]}{currentUser.group ? ` · กลุ่ม ${currentUser.group}` : ''}</div>
             </div>
           )}
-          <button onClick={logout} className="btn-ghost" style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: collapsed ? '8px 0' : '8px 10px', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
-            {!collapsed && <span>ออกจากระบบ</span>}<span>➜]</span>
-          </button>
         </div>
       )}
     </aside>

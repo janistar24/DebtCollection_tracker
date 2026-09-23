@@ -6,6 +6,7 @@ import StatusBadge from '../components/StatusBadge'
 import Modal from '../components/Modal'
 import EmptyState from '../components/EmptyState'
 import BuddhistDateInput from '../components/BuddhistDateInput'
+import AnnouncementPanel from '../components/AnnouncementPanel'
 import type { FollowUp as _FU } from '../types'
 import {
   getTotalAssessed, getTotalRemaining, getPaymentStatus,
@@ -914,6 +915,7 @@ export default function DashboardPage() {
 
   return (
     <div className="app-fluid-page">
+      <AnnouncementPanel />
       {/* Toast */}
       {callLogToast && (
         <div style={{
