@@ -96,6 +96,7 @@ def ensure_user_invitation_schema() -> None:
         "005_add_user_email_invitations.sql",
         "006_add_taxpayer_title.sql",
         "007_system_announcements.sql",
+        "008_allow_multiple_officers_per_group.sql",
     ):
         migration_path = os.path.join(os.path.dirname(__file__), "migrations", migration_name)
         with open(migration_path, "r", encoding="utf-8") as migration_file:
@@ -490,13 +491,6 @@ def create_user_invitation(payload: AdminUserInvitation, http_request: Request):
             )
             if cursor.fetchone():
                 raise HTTPException(status_code=409, detail="มีลิงก์คำเชิญที่ยังไม่หมดอายุสำหรับอีเมลนี้")
-            if role == "OFFICER":
-                cursor.execute(
-                    """SELECT user_id FROM public.responsibility_assignments
-                       WHERE group_code=%s AND is_active=TRUE""", (payload.group_code,),
-                )
-                if cursor.fetchone():
-                    raise HTTPException(status_code=409, detail="กลุ่มนี้มีเจ้าหน้าที่ผู้รับผิดชอบอยู่แล้ว")
             cursor.execute(
                 """INSERT INTO public.user_invitations
                    (email,employee_code,first_name,last_name,role,group_code,token_hash,expires_at,created_by)
@@ -582,16 +576,6 @@ def _save_user_assignment(cursor, user_id: int, role: str, group_code: str | Non
                 (user_id, group_code),
             )
             return
-        cursor.execute(
-            """SELECT user_id FROM public.responsibility_assignments
-               WHERE group_code=%s AND is_active=TRUE AND user_id<>%s""",
-            (group_code, user_id),
-        )
-        if cursor.fetchone():
-            raise HTTPException(
-                status_code=409,
-                detail=f"กลุ่ม {group_code} มีพนักงานผู้รับผิดชอบที่ใช้งานอยู่แล้ว",
-            )
         cursor.execute(
             """INSERT INTO public.responsibility_assignments
                (user_id,group_code,start_date,is_active)
