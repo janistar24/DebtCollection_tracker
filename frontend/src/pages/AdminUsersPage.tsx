@@ -120,7 +120,6 @@ export default function AdminUsersPage() {
       <div><h2 style={{ margin: '0 0 4px', fontSize: 21 }}>จัดการผู้ใช้งาน</h2><p style={SUB}>สร้างบัญชี กำหนดสิทธิ์ และควบคุมกลุ่มข้อมูลที่ผู้ใช้งานรับผิดชอบ</p></div>
       <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap' }}>
         <button type="button" className="btn-secondary" disabled={dataLoading} onClick={() => void refreshUsers()}>{dataLoading ? 'กำลังรีเฟรช...' : '↻ รีเฟรช'}</button>
-        <button type="button" className="btn-secondary" onClick={openInvite}>✉ สร้างคำเชิญ</button>
         <button type="button" className="btn-primary" onClick={openAdd}>＋ เพิ่มผู้ใช้งาน</button>
       </div>
     </div>

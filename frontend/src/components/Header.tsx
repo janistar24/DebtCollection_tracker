@@ -37,6 +37,7 @@ export default function Header({ pathname }: Props) {
   const [confirmPassword, setConfirmPassword] = useState('')
   const [announcementTitle, setAnnouncementTitle] = useState('แจ้งปรับปรุงระบบ')
   const [announcementContent, setAnnouncementContent] = useState('ระบบจะปิดปรับปรุงชั่วคราว กรุณาบันทึกงานก่อนเวลาที่กำหนด')
+  const [announcementDate, setAnnouncementDate] = useState('')
   const [announcementTime, setAnnouncementTime] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState('')
@@ -86,16 +87,16 @@ export default function Header({ pathname }: Props) {
 
   const submitAnnouncement = async () => {
     setFormError('')
-    if (!announcementTime) return setFormError('กรุณาระบุวันและเวลาเริ่มปรับปรุงระบบ')
+    if (!announcementDate || !announcementTime) return setFormError('กรุณาระบุวันที่และเวลาเริ่มปรับปรุงระบบให้ครบถ้วน')
     try {
       setSubmitting(true)
       await createAnnouncement({
         title: announcementTitle,
         content: announcementContent,
-        starts_at: new Date(announcementTime).toISOString(),
+        starts_at: new Date(`${announcementDate}T${announcementTime}`).toISOString(),
       })
       window.dispatchEvent(new Event('debt-collection:announcements-changed'))
-      setAnnouncementOpen(false); setAnnouncementTime('')
+      setAnnouncementOpen(false); setAnnouncementDate(''); setAnnouncementTime('')
       alert('เผยแพร่ประกาศเรียบร้อยแล้ว')
     } catch (error) { setFormError(error instanceof Error ? error.message : 'ไม่สามารถสร้างประกาศได้') }
     finally { setSubmitting(false) }
@@ -178,7 +179,7 @@ export default function Header({ pathname }: Props) {
     )}
     {profileOpen && currentUser && <Modal title="ข้อมูลของฉัน" onClose={() => setProfileOpen(false)} maxWidth="430px"><div style={{ display: 'grid', gap: 12, fontSize: 14 }}><div><b>ชื่อผู้ใช้งาน</b><div style={{ color: '#756987', marginTop: 4 }}>{currentUser.name}</div></div><div><b>สิทธิ์การใช้งาน</b><div style={{ color: '#756987', marginTop: 4 }}>{ROLE_LABEL[currentUser.role]}</div></div>{currentUser.group && <div><b>กลุ่มที่รับผิดชอบ</b><div style={{ color: '#756987', marginTop: 4 }}>กลุ่ม {currentUser.group}</div></div>}</div></Modal>}
     {passwordOpen && <Modal title="เปลี่ยนรหัสผ่าน" onClose={() => { setPasswordOpen(false); setFormError('') }} maxWidth="460px"><div style={{ display: 'grid', gap: 13 }}><label>รหัสผ่านปัจจุบัน<input type="password" className="input-field" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} style={{ marginTop: 5 }} /></label><label>รหัสผ่านใหม่<input type="password" className="input-field" value={newPassword} onChange={e => setNewPassword(e.target.value)} style={{ marginTop: 5 }} /></label><label>ยืนยันรหัสผ่านใหม่<input type="password" className="input-field" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} style={{ marginTop: 5 }} /></label>{formError && <div style={{ color: '#c0392b', fontSize: 12 }}>{formError}</div>}<button type="button" className="btn-primary" disabled={submitting} onClick={submitPassword}>{submitting ? 'กำลังบันทึก...' : 'บันทึกรหัสผ่านใหม่'}</button></div></Modal>}
-    {announcementOpen && <Modal title="ประกาศปรับปรุงระบบ" onClose={() => { setAnnouncementOpen(false); setFormError('') }} maxWidth="520px"><div style={{ display: 'grid', gap: 13 }}><label>หัวข้อประกาศ<input className="input-field" value={announcementTitle} onChange={e => setAnnouncementTitle(e.target.value)} style={{ marginTop: 5 }} /></label><label>รายละเอียด<textarea className="input-field" value={announcementContent} onChange={e => setAnnouncementContent(e.target.value)} rows={4} style={{ marginTop: 5, resize: 'vertical' }} /></label><label>วันและเวลาเริ่มปรับปรุง<BuddhistDateInput value={announcementTime} onChange={setAnnouncementTime} includeTime required style={{ marginTop: 5 }} /></label><div style={{ color: '#81759f', fontSize: 12, lineHeight: 1.6 }}>เมื่อถึงเวลาระบบจะบันทึกงานที่กำลังแก้ไขให้ก่อนเข้าสู่หน้ารอ และกลับสู่หน้าเข้าสู่ระบบหลังตรวจพบว่า Railway deploy รุ่นใหม่เสร็จแล้ว</div>{formError && <div style={{ color: '#c0392b', fontSize: 12 }}>{formError}</div>}<button type="button" className="btn-primary" disabled={submitting} onClick={submitAnnouncement}>{submitting ? 'กำลังเผยแพร่...' : 'เผยแพร่ประกาศ'}</button></div></Modal>}
+    {announcementOpen && <Modal title="ประกาศปรับปรุงระบบ" onClose={() => { setAnnouncementOpen(false); setFormError('') }} maxWidth="520px"><div style={{ display: 'grid', gap: 13 }}><label>หัวข้อประกาศ<input className="input-field" value={announcementTitle} onChange={e => setAnnouncementTitle(e.target.value)} style={{ marginTop: 5 }} /></label><label>รายละเอียด<textarea className="input-field" value={announcementContent} onChange={e => setAnnouncementContent(e.target.value)} rows={4} style={{ marginTop: 5, resize: 'vertical' }} /></label><div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(150px, .55fr)', gap: 12 }}><label>วันที่เริ่มปรับปรุง<BuddhistDateInput value={announcementDate} onChange={setAnnouncementDate} required style={{ marginTop: 5 }} /></label><label>เวลาเริ่มปรับปรุง<input type="time" className="input-field" value={announcementTime} onChange={e => setAnnouncementTime(e.target.value)} required style={{ marginTop: 5 }} /></label></div><div style={{ color: '#81759f', fontSize: 12, lineHeight: 1.6 }}>เมื่อถึงเวลาระบบจะบันทึกงานที่กำลังแก้ไขให้ก่อนเข้าสู่หน้ารอ และกลับสู่หน้าเข้าสู่ระบบหลังตรวจพบว่า Railway deploy รุ่นใหม่เสร็จแล้ว</div>{formError && <div style={{ color: '#c0392b', fontSize: 12 }}>{formError}</div>}<button type="button" className="btn-primary" disabled={submitting} onClick={submitAnnouncement}>{submitting ? 'กำลังเผยแพร่...' : 'เผยแพร่ประกาศ'}</button></div></Modal>}
     </>
   )
 }
