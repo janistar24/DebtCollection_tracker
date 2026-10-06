@@ -16,6 +16,7 @@ import {
 } from '../data/taxData'
 import type { FollowUp } from '../types'
 import { createFollowUpLog } from '../api/follow_up_logs'
+import { generateOwnerCode } from '../utils/ownerCode'
 
 const FOLLOW_FILTER_LABELS = [
   { key: 'followed', label: 'ติดต่อแล้ว' },
@@ -63,6 +64,66 @@ const getPriorOutstandingThroughYear = (tp: Parameters<typeof getOutstandingYear
 type TaskScopeKey = typeof TASK_SCOPE_LABELS[number]['key']
 
 const DONUT_COLORS = ['#7c5cbf', '#c4b5f0', '#f0a0a0']
+
+// ใช้ generator ตัวเดียวกับหน้าเพิ่มผู้เสียภาษี เพื่อให้ผลลัพธ์ตรงกันทุกจุด
+function OwnerCodeCalculatorModal({ onClose }: { onClose: () => void }) {
+  const [firstName, setFirstName] = useState('')
+  const [lastName, setLastName] = useState('')
+  const ownerCode = firstName.trim() && lastName.trim()
+    ? generateOwnerCode(firstName, lastName)
+    : ''
+
+  return (
+    <Modal onClose={onClose} title="คำนวณรหัสเจ้าของทรัพย์สิน">
+      <div style={{ width: 'min(520px, 100%)' }}>
+        <div style={{
+          padding: '11px 14px', marginBottom: 18, borderRadius: 11,
+          background: 'rgba(124,92,191,0.07)', color: '#6b5b95',
+          fontSize: 12, lineHeight: 1.6,
+        }}>
+          เครื่องมือนี้ใช้สำหรับคำนวณ Owner Code ชั่วคราวเท่านั้น ข้อมูลที่กรอกและผลลัพธ์จะไม่ถูกบันทึกลงระบบ
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 14 }}>
+          <div>
+            <label style={{ display: 'block', fontSize: 12, color: '#6b5b95', marginBottom: 6 }}>ชื่อ (ไม่ต้องมีคำนำหน้า)</label>
+            <input className="input-field" autoFocus placeholder="เช่น กรกน" value={firstName}
+              onChange={event => setFirstName(event.target.value)} />
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: 12, color: '#6b5b95', marginBottom: 6 }}>นามสกุล</label>
+            <input className="input-field" placeholder="เช่น สำลีสัน" value={lastName}
+              onChange={event => setLastName(event.target.value)} />
+          </div>
+        </div>
+
+        <div style={{
+          marginTop: 18, padding: '18px 20px', borderRadius: 14,
+          background: ownerCode ? 'rgba(26,143,90,0.06)' : 'rgba(240,236,251,0.45)',
+          border: `1px solid ${ownerCode ? 'rgba(26,143,90,0.25)' : 'rgba(180,165,230,0.28)'}`,
+          textAlign: 'center',
+        }}>
+          <div style={{ fontSize: 11, color: '#a89cc8', marginBottom: 7 }}>รหัสเจ้าของทรัพย์สิน</div>
+          {ownerCode ? (
+            <div style={{ fontFamily: 'monospace', fontSize: 25, fontWeight: 800, color: '#2d2545', letterSpacing: '0.06em' }}>{ownerCode}</div>
+          ) : (
+            <div style={{ fontSize: 13, color: '#a89cc8' }}>กรอกชื่อและนามสกุลเพื่อคำนวณรหัส</div>
+          )}
+        </div>
+
+        {firstName.trim() && lastName.trim() && !ownerCode && (
+          <div style={{ marginTop: 8, color: '#c0392b', fontSize: 12 }}>
+            ไม่สามารถคำนวณรหัสได้ กรุณาตรวจสอบว่าชื่อมีพยัญชนะไทย
+          </div>
+        )}
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 20 }}>
+          <button className="btn-secondary" type="button" onClick={onClose}>ปิด</button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
 
 // ─── Call Log Modal ────────────────────────────────────────────────────────────
 function _LegacyCallLogModal({ onClose, onSave }: { onClose: () => void; onSave: (fu: Omit<FollowUp, 'id'>) => Promise<void> }) {
@@ -697,6 +758,7 @@ export default function DashboardPage() {
   const [paymentFilters, setPaymentFilters] = useState<PaymentFilterKey[]>([])
   const [showTaskFilters, setShowTaskFilters] = useState(false)
   const [showCallLog, setShowCallLog] = useState(false)
+  const [showOwnerCodeCalculator, setShowOwnerCodeCalculator] = useState(false)
   const [callLogToast, setCallLogToast] = useState(false)
 
   const isDirector = currentUser?.role === 'director' || currentUser?.role === 'admin'
@@ -928,19 +990,29 @@ export default function DashboardPage() {
         </div>
       )}
 
+      {showOwnerCodeCalculator && (
+        <OwnerCodeCalculatorModal onClose={() => setShowOwnerCodeCalculator(false)} />
+      )}
+
       {/* 1. Greeting */}
-      <div style={{ marginBottom: 20 }}>
-        <div style={{ fontSize: 20, fontWeight: 700, color: '#2d2545' }}>
-          สวัสดี, {currentUser?.name} 👋
+      <div style={{ marginBottom: 20, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+        <div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: '#2d2545' }}>
+            สวัสดี, {currentUser?.name} 👋
+          </div>
+          <div style={{ fontSize: 14, color: '#6b5b95', marginTop: 4 }}>
+            ปีภาษี {selectedYear}
+            {!isDirector && ` · กลุ่ม ${currentUser?.group}`}
+            {' · '}
+            <span style={{ color: '#c0392b', fontWeight: 600 }}>ยังไม่ชำระ {unpaidCount} ราย</span>
+            {' · '}
+            <span style={{ color: '#7c5cbf', fontWeight: 600 }}>ยังไม่ได้ติดต่อ {noneCount} ราย</span>
+          </div>
         </div>
-        <div style={{ fontSize: 14, color: '#6b5b95', marginTop: 4 }}>
-          ปีภาษี {selectedYear}
-          {!isDirector && ` · กลุ่ม ${currentUser?.group}`}
-          {' · '}
-          <span style={{ color: '#c0392b', fontWeight: 600 }}>ยังไม่ชำระ {unpaidCount} ราย</span>
-          {' · '}
-          <span style={{ color: '#7c5cbf', fontWeight: 600 }}>ยังไม่ได้ติดต่อ {noneCount} ราย</span>
-        </div>
+        <button className="btn-secondary" type="button" onClick={() => setShowOwnerCodeCalculator(true)}
+          style={{ whiteSpace: 'nowrap', padding: '9px 14px' }}>
+          🧮 คำนวณ Owner Code
+        </button>
       </div>
 
       {/* 2. Quick Menu — Flow ทวงหนี้ 4 ขั้นตอน */}
