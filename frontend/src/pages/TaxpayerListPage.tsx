@@ -30,8 +30,17 @@ const THAI_DICTIONARY_COLLATOR = new Intl.Collator('th-TH', {
   numeric: true,
 })
 
-const compareTaxpayersByThaiDictionary = (a: Taxpayer, b: Taxpayer) => {
-  // บุคคลธรรมดาเรียงจากชื่อจริง ไม่ใช้คำนำหน้า เช่น นาย/นาง/ยศ เป็นตัวกำหนดลำดับ
+const compareTaxpayersByOwnerCode = (a: Taxpayer, b: Taxpayer) => {
+  // ตาราง กค. เรียงตาม Owner Code เป็นหลัก เพื่อให้ลำดับคงที่แม้ข้อมูลเก่า
+  // จะยังมีคำนำหน้าหรือยศรวมอยู่ในช่องชื่อ
+  const ownerCodeA = (a.ownerCode ?? '').trim()
+  const ownerCodeB = (b.ownerCode ?? '').trim()
+  if (ownerCodeA && !ownerCodeB) return -1
+  if (!ownerCodeA && ownerCodeB) return 1
+  const ownerCode = THAI_DICTIONARY_COLLATOR.compare(ownerCodeA, ownerCodeB)
+  if (ownerCode !== 0) return ownerCode
+
+  // ใช้ชื่อและนามสกุลเป็นลำดับรองเมื่อ Owner Code เหมือนกัน
   const primaryA = a.type === 'company' ? (a.companyName ?? '') : a.firstName
   const primaryB = b.type === 'company' ? (b.companyName ?? '') : b.firstName
   const primary = THAI_DICTIONARY_COLLATOR.compare(primaryA.trim(), primaryB.trim())
@@ -152,7 +161,7 @@ export default function TaxpayerListPage() {
       // hide removed (no assessment this year)
       if (!tp.assessments.find(a => a.year === selectedYear)) return false
       return true
-    }).sort(compareTaxpayersByThaiDictionary)
+    }).sort(compareTaxpayersByOwnerCode)
   }, [taxpayers, search, groupFilter, statusFilter, personTypeFilter, selectedYear, currentUser, isDirector])
 
   const landTotal = filtered.reduce((s, tp) => s + (getAssessment(tp, selectedYear)?.landAmount ?? 0), 0)
