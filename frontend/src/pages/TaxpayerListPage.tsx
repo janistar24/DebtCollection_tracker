@@ -23,6 +23,30 @@ import type { Taxpayer } from '../types'
 import { SYSTEM_UPDATE_EVENT, type SystemUpdateEventDetail } from '../systemUpdate'
 
 const GROUPS = ['ก-น', 'บ-ล', 'ส-ศ', 'ว-ฮ และบริษัท']
+const THAI_DICTIONARY_COLLATOR = new Intl.Collator('th-TH', {
+  usage: 'sort',
+  sensitivity: 'base',
+  ignorePunctuation: true,
+  numeric: true,
+})
+
+const compareTaxpayersByThaiDictionary = (a: Taxpayer, b: Taxpayer) => {
+  // บุคคลธรรมดาเรียงจากชื่อจริง ไม่ใช้คำนำหน้า เช่น นาย/นาง/ยศ เป็นตัวกำหนดลำดับ
+  const primaryA = a.type === 'company' ? (a.companyName ?? '') : a.firstName
+  const primaryB = b.type === 'company' ? (b.companyName ?? '') : b.firstName
+  const primary = THAI_DICTIONARY_COLLATOR.compare(primaryA.trim(), primaryB.trim())
+  if (primary !== 0) return primary
+
+  const secondary = THAI_DICTIONARY_COLLATOR.compare(
+    a.type === 'company' ? '' : a.lastName.trim(),
+    b.type === 'company' ? '' : b.lastName.trim(),
+  )
+  if (secondary !== 0) return secondary
+
+  const displayedName = THAI_DICTIONARY_COLLATOR.compare(getTaxpayerName(a), getTaxpayerName(b))
+  if (displayedName !== 0) return displayedName
+  return THAI_DICTIONARY_COLLATOR.compare(a.ownerCode ?? '', b.ownerCode ?? '')
+}
 // Safari needs extra room for Thai text and notes that may wrap to a second line.
 // Keeping 22 records per A4 page prevents the final row from being clipped.
 const PRINT_ROWS_PER_PAGE = 20
@@ -128,9 +152,7 @@ export default function TaxpayerListPage() {
       // hide removed (no assessment this year)
       if (!tp.assessments.find(a => a.year === selectedYear)) return false
       return true
-    }).sort((a, b) =>
-      getTaxpayerName(a).localeCompare(getTaxpayerName(b), 'th')
-    )
+    }).sort(compareTaxpayersByThaiDictionary)
   }, [taxpayers, search, groupFilter, statusFilter, personTypeFilter, selectedYear, currentUser, isDirector])
 
   const landTotal = filtered.reduce((s, tp) => s + (getAssessment(tp, selectedYear)?.landAmount ?? 0), 0)
