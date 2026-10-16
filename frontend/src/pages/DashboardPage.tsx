@@ -69,12 +69,33 @@ const DONUT_COLORS = ['#7c5cbf', '#c4b5f0', '#f0a0a0']
 function OwnerCodeCalculatorModal({ onClose }: { onClose: () => void }) {
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle')
   const ownerCode = firstName.trim() && lastName.trim()
     ? generateOwnerCode(firstName, lastName)
     : ''
 
+  const copyOwnerCode = async () => {
+    if (!ownerCode) return
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable')
+      await navigator.clipboard.writeText(ownerCode)
+      setCopyStatus('copied')
+    } catch {
+      const textArea = document.createElement('textarea')
+      textArea.value = ownerCode
+      textArea.style.position = 'fixed'
+      textArea.style.opacity = '0'
+      document.body.appendChild(textArea)
+      textArea.focus()
+      textArea.select()
+      const copied = document.execCommand('copy')
+      textArea.remove()
+      setCopyStatus(copied ? 'copied' : 'failed')
+    }
+  }
+
   return (
-    <Modal onClose={onClose} title="คำนวณรหัสเจ้าของทรัพย์สิน">
+    <Modal onClose={onClose} title="คำนวณรหัสเจ้าของทรัพย์สิน" closeOnBackdrop={false}>
       <div style={{ width: 'min(520px, 100%)' }}>
         <div style={{
           padding: '11px 14px', marginBottom: 18, borderRadius: 11,
@@ -88,12 +109,12 @@ function OwnerCodeCalculatorModal({ onClose }: { onClose: () => void }) {
           <div>
             <label style={{ display: 'block', fontSize: 12, color: '#6b5b95', marginBottom: 6 }}>ชื่อ (ไม่ต้องมีคำนำหน้า)</label>
             <input className="input-field" autoFocus placeholder="เช่น กรกน" value={firstName}
-              onChange={event => setFirstName(event.target.value)} />
+              onChange={event => { setFirstName(event.target.value); setCopyStatus('idle') }} />
           </div>
           <div>
             <label style={{ display: 'block', fontSize: 12, color: '#6b5b95', marginBottom: 6 }}>นามสกุล</label>
             <input className="input-field" placeholder="เช่น สำลีสัน" value={lastName}
-              onChange={event => setLastName(event.target.value)} />
+              onChange={event => { setLastName(event.target.value); setCopyStatus('idle') }} />
           </div>
         </div>
 
@@ -105,7 +126,18 @@ function OwnerCodeCalculatorModal({ onClose }: { onClose: () => void }) {
         }}>
           <div style={{ fontSize: 11, color: '#a89cc8', marginBottom: 7 }}>รหัสเจ้าของทรัพย์สิน</div>
           {ownerCode ? (
-            <div style={{ fontFamily: 'monospace', fontSize: 25, fontWeight: 800, color: '#2d2545', letterSpacing: '0.06em' }}>{ownerCode}</div>
+            <>
+              <div style={{ fontFamily: 'monospace', fontSize: 25, fontWeight: 800, color: '#2d2545', letterSpacing: '0.06em', userSelect: 'text' }}>{ownerCode}</div>
+              <button className="btn-secondary" type="button" onClick={copyOwnerCode}
+                style={{ marginTop: 14, minWidth: 120 }}>
+                {copyStatus === 'copied' ? '✓ คัดลอกแล้ว' : '📋 คัดลอก'}
+              </button>
+              {copyStatus === 'failed' && (
+                <div style={{ marginTop: 8, color: '#c0392b', fontSize: 12 }}>
+                  คัดลอกอัตโนมัติไม่สำเร็จ กรุณาลากเลือกข้อความแล้วคัดลอก
+                </div>
+              )}
+            </>
           ) : (
             <div style={{ fontSize: 13, color: '#a89cc8' }}>กรอกชื่อและนามสกุลเพื่อคำนวณรหัส</div>
           )}
@@ -116,10 +148,6 @@ function OwnerCodeCalculatorModal({ onClose }: { onClose: () => void }) {
             ไม่สามารถคำนวณรหัสได้ กรุณาตรวจสอบว่าชื่อมีพยัญชนะไทย
           </div>
         )}
-
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 20 }}>
-          <button className="btn-secondary" type="button" onClick={onClose}>ปิด</button>
-        </div>
       </div>
     </Modal>
   )
